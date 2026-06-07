@@ -47,7 +47,7 @@ class PiManagerApp(ctk.CTk):
         self.grid_rowconfigure(1, weight=0)  # 状态栏
 
         # ===== 左侧边栏 =====
-        self._sidebar = ctk.CTkFrame(self, width=240, corner_radius=0)
+        self._sidebar = ctk.CTkFrame(self, width=240, fg_color="transparent", corner_radius=0)
         self._sidebar.grid(row=0, column=0, sticky="ns", rowspan=2)
         self._sidebar.grid_propagate(False)
         self._sidebar.grid_columnconfigure(0, weight=1)
@@ -61,8 +61,11 @@ class PiManagerApp(ctk.CTk):
 
         # ===== 背景层 =====
         self._bg_image = None
-        self._bg_refs = []  # 防 GC
-        self._apply_background()
+        self._bg_refs = []  # 防 GC，存所有裁剪后的 PhotoImage
+        self._bg_loaded = False
+
+        # 等窗口完全就绪后一次性加载背景
+        self.after_idle(self._apply_background)
         self.bind("<Configure>", self._on_window_resize)
 
         # ===== 页面容器 =====
@@ -93,7 +96,7 @@ class PiManagerApp(ctk.CTk):
     def _build_sidebar(self):
         """构建侧边栏"""
         # Logo / 标题
-        title_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent")
+        title_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent", corner_radius=0)
         title_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(20, 10))
 
         ctk.CTkLabel(title_frame, text="🥧", font=ctk.CTkFont(size=36)).pack(pady=(0, 5))
@@ -114,7 +117,7 @@ class PiManagerApp(ctk.CTk):
         self._conn_host.pack(pady=(0, 8))
 
         # 连接按钮
-        btn_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent")
+        btn_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent", corner_radius=0)
         btn_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 10))
 
         self._btn_connect = ctk.CTkButton(
@@ -151,7 +154,7 @@ class PiManagerApp(ctk.CTk):
             self._nav_buttons[page_id] = btn
 
         # 底部信息
-        bottom_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent")
+        bottom_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent", corner_radius=0)
         bottom_frame.grid(row=10, column=0, sticky="ew", padx=15, pady=10)
         bottom_frame.grid_rowconfigure(10, weight=1)
 
@@ -323,7 +326,7 @@ class PiManagerApp(ctk.CTk):
         frame = ctk.CTkFrame(self._content, fg_color="transparent", corner_radius=0)
 
         # 使用scrollable
-        scroll = ctk.CTkScrollableFrame(frame, fg_color="transparent")
+        scroll = ctk.CTkScrollableFrame(frame, fg_color="transparent", corner_radius=0)
         scroll.pack(fill="both", expand=True, padx=5, pady=5)
 
         # ===== 外观设置 =====
@@ -366,7 +369,7 @@ class PiManagerApp(ctk.CTk):
         self._bg_path_label = ctk.CTkLabel(bg_frame, text=bg_display, text_color="gray")
         self._bg_path_label.grid(row=0, column=1, sticky="e", padx=10, pady=8)
 
-        bg_btn_frame = ctk.CTkFrame(bg_frame, fg_color="transparent")
+        bg_btn_frame = ctk.CTkFrame(bg_frame, fg_color="transparent", corner_radius=0)
         bg_btn_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
         ctk.CTkButton(
             bg_btn_frame, text="选择图片", width=90, height=28,
@@ -433,7 +436,7 @@ class PiManagerApp(ctk.CTk):
     def _on_opacity_change(self, val: float):
         """调整背景透明度"""
         self._config["appearance"]["background_opacity"] = float(val)
-        self._apply_background()
+        self._apply_background(force=True)
 
     def _choose_background(self):
         """选择背景图片"""
@@ -443,7 +446,7 @@ class PiManagerApp(ctk.CTk):
         if path:
             self._config["appearance"]["background_path"] = path
             self._bg_path_label.configure(text=os.path.basename(path))
-            self._apply_background()
+            self._apply_background(force=True)
 
     def _clear_background(self):
         """清除背景"""
@@ -452,13 +455,38 @@ class PiManagerApp(ctk.CTk):
         self._clear_all_bg_images()
 
     def _on_window_resize(self, event=None):
-        """窗口大小改变时更新背景"""
+        """窗口大小改变时更新背景（仅当尺寸真正变化）"""
+        if not hasattr(self, '_content'):
+            return
+        cw = self._content.winfo_width()
+        ch = self._content.winfo_height()
+        if cw < 50 or ch < 50:
+            return
+        last_size = getattr(self, '_bg_last_size', (0, 0))
+        if (cw, ch) == last_size:
+            return
+        self._bg_last_size = (cw, ch)
         if hasattr(self, '_resize_after_id') and self._resize_after_id:
             self.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.after(300, self._apply_background)
+        self._resize_after_id = self.after(600, self._apply_background)
 
-    def _apply_background(self):
-        """应用背景 - 加载图片，递归绘制到所有内容区域 Canvas"""
+    def _apply_background(self, force=False):
+        """应用背景 - 加载图片，递归绘制到所有内容区域 Canvas 上"""
+        import time
+        now = time.time()
+        # 防止短时间重复调用（2秒内只允许一次，force 除外）
+        if not force and hasattr(self, '_bg_last_call') and (now - self._bg_last_call) < 2.0:
+            return
+        if hasattr(self, '_bg_applying') and self._bg_applying:
+            return
+        self._bg_applying = True
+        self._bg_last_call = now
+        try:
+            self._do_apply_background()
+        finally:
+            self._bg_applying = False
+
+    def _do_apply_background(self):
         self._clear_all_bg_images()
 
         bg_path = self._config["appearance"].get("background_path", "")
@@ -466,7 +494,7 @@ class PiManagerApp(ctk.CTk):
             return
 
         try:
-            opacity = self._config["appearance"].get("background_opacity", 0.15)
+            opacity = self._config["appearance"].get("background_opacity", 0.25)
             self.update_idletasks()
             cw = self._content.winfo_width()
             ch = self._content.winfo_height()
@@ -475,25 +503,19 @@ class PiManagerApp(ctk.CTk):
 
             img = Image.open(bg_path)
             img = img.resize((cw, ch), Image.LANCZOS)
-
             if img.mode != "RGBA":
                 img = img.convert("RGBA")
-            alpha = int(255 * opacity)
-            pixels = img.load()
-            for y in range(img.height):
-                for x in range(img.width):
-                    r, g, b, _ = pixels[x, y]
-                    pixels[x, y] = (r, g, b, alpha)
+
+            img.putalpha(Image.new("L", img.size, int(255 * opacity)))
 
             self._bg_image = ImageTk.PhotoImage(img)
-
             self._draw_bg_on_canvas(self._content)
 
-        except Exception as e:
-            print(f"背景加载失败: {e}")
+        except Exception:
+            pass
 
-    def _draw_bg_on_canvas(self, widget):
-        """递归在 CTkFrame canvas 上绘制背景(裁剪+偏移，防 widget 覆盖)"""
+    def _draw_bg_on_canvas(self, widget, count=None):
+        """递归在所有 CTkFrame canvas 上绘制裁剪后的背景图"""
         if not self._bg_image:
             return
 
@@ -515,17 +537,19 @@ class PiManagerApp(ctk.CTk):
                     if right > left and bottom > top:
                         cropped = pil_img.crop((int(left), int(top), int(right), int(bottom)))
                         tk_img = ImageTk.PhotoImage(cropped)
-                        self._bg_refs.append(tk_img)  # 防 GC
+                        self._bg_refs.append(tk_img)
 
                         dx = -wx if wx < 0 else 0
                         dy = -wy if wy < 0 else 0
                         c.create_image(dx, dy, anchor="nw", image=tk_img, tags="bg_image")
                         c.tag_lower("bg_image")
+                        if count is not None:
+                            count[0] += 1
             except Exception:
                 pass
 
         for child in widget.winfo_children():
-            self._draw_bg_on_canvas(child)
+            self._draw_bg_on_canvas(child, count)
 
     def _clear_all_bg_images(self):
         """清除所有 canvas 上的背景图"""
