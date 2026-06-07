@@ -54,7 +54,9 @@ class FileBrowser(ctk.CTkFrame):
         self._btn_refresh.grid(row=0, column=3, padx=(2, 5), pady=5)
 
         # ===== 文件列表头 =====
-        header_frame = ctk.CTkFrame(self, height=30, fg_color=("gray85", "gray20"))
+        header_frame = ctk.CTkFrame(
+            self, height=30, fg_color="transparent", corner_radius=0,
+            border_width=1, border_color=("gray70", "gray35"))
         header_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 0))
         header_frame.grid_columnconfigure(0, weight=1)
         header_frame.grid_columnconfigure(1, weight=0)
@@ -160,7 +162,7 @@ class FileBrowser(ctk.CTkFrame):
         for i, item in enumerate(items):
             row_frame = ctk.CTkFrame(
                 self._file_scroll, fg_color="transparent",
-                corner_radius=4)
+                corner_radius=0)
             row_frame.grid(row=i, column=0, sticky="ew", pady=1)
             row_frame.grid_columnconfigure(0, weight=1)
 
