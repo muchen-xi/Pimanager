@@ -1,60 +1,319 @@
 """
-PiManager 文件浏览器 - 远程文件管理（浏览/上传/下载/删除/重命名）
+PiManager 文件浏览器 - 远程文件管理（浏览/上传/下载/删除/重命名/运行）
 """
 import customtkinter as ctk
 import threading
 import os
 import datetime
+import tkinter as tk
 from tkinter import filedialog, messagebox, Menu
+
+
+# ===== Canvas 文件列表组件（替代 CTkScrollableFrame+CTkFrame，真透明看背景） =====
+
+class CanvasFileList(ctk.CTkFrame):
+    """基于 Canvas 的文件列表 — 一个画布渲染所有行，单个背景片段，不跳动。"""
+
+    def __init__(self, master, **kwargs):
+        super().__init__(master, fg_color="transparent", corner_radius=0, **kwargs)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # 内部 tk.Canvas
+        self._canvas = tk.Canvas(
+            self, highlightthickness=0, bd=0, bg="#0D1117")
+        self._canvas.grid(row=0, column=0, sticky="nsew")
+
+        # 数据
+        self._items: list[dict] = []
+        self._row_height = 32
+        self._selected_idx = -1
+        self._pad_x = 8
+
+        # 回调（由 FileBrowser 设置）
+        self.on_click = None       # (index, item)
+        self.on_double_click = None  # (item)
+        self.on_right_click = None   # (event, item)
+
+        # 滚动
+        self._scroll_y = 0
+        self._canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self._canvas.bind("<Button-4>", lambda e: self._scroll(-60))
+        self._canvas.bind("<Button-5>", lambda e: self._scroll(60))
+        self._canvas.bind("<Button-1>", self._on_canvas_click)
+        self._canvas.bind("<Double-Button-1>", self._on_canvas_double)
+        self._canvas.bind("<Button-3>", self._on_canvas_right)
+        self.bind("<Configure>", self._on_resize)
+
+        # 背景引用
+        self._bg_refs = []
+
+    def set_items(self, items: list[dict]):
+        """设置文件列表数据。"""
+        self._items = items
+        self._selected_idx = -1
+        self._scroll_y = 0
+        self._redraw()
+
+    def _on_resize(self, event=None):
+        self._redraw()
+
+    def _apply_bg(self):
+        """绘制背景图片片段到 canvas。"""
+        try:
+            from .app import BackgroundManager
+            if not BackgroundManager._enabled:
+                return
+            pil_full = getattr(BackgroundManager, '_bg_pil_blended', None)
+            if pil_full is None:
+                return
+            content = BackgroundManager._content_frame
+            if content is None:
+                return
+            c = self._canvas
+            cw = c.winfo_width()
+            ch = c.winfo_height()
+            if cw < 20 or ch < 20:
+                return
+            wx = c.winfo_rootx() - content.winfo_rootx()
+            wy = c.winfo_rooty() - content.winfo_rooty()
+            from PIL import ImageTk
+            left = max(0, int(wx))
+            top = max(0, int(wy))
+            right = min(pil_full.width, int(wx + cw))
+            bottom = min(pil_full.height, int(wy + ch))
+            if right > left and bottom > top:
+                cropped = pil_full.crop((left, top, right, bottom))
+                tk_img = ImageTk.PhotoImage(cropped)
+                self._bg_refs.append(tk_img)
+                if len(self._bg_refs) > 10:
+                    self._bg_refs = self._bg_refs[-5:]
+                c.delete("bg_fragment")
+                dx = -int(wx) if wx < 0 else 0
+                dy = -int(wy) if wy < 0 else 0
+                c.create_image(dx, dy, anchor="nw", image=tk_img, tags="bg_fragment")
+                c.tag_lower("bg_fragment")
+        except Exception:
+            pass
+
+    def _redraw(self):
+        """重绘可见行。"""
+        c = self._canvas
+        c.delete("row")
+        c.delete("scrollbar")
+
+        if not self._items:
+            return
+
+        self._apply_bg()
+
+        cw = c.winfo_width()
+        ch = c.winfo_height()
+        if cw < 20:
+            cw = 600
+
+        # 列宽
+        col_size = 90
+        col_time = 160
+        col_name = cw - col_size - col_time - self._pad_x * 4
+
+        total = len(self._items)
+        total_h = total * self._row_height
+        visible = max(1, ch // self._row_height)
+
+        # 限制滚动范围
+        max_scroll = max(0, total_h - ch)
+        self._scroll_y = max(0, min(self._scroll_y, max_scroll))
+
+        start_idx = self._scroll_y // self._row_height
+        end_idx = min(total, start_idx + visible + 1)
+        offset_y = -(self._scroll_y % self._row_height)
+
+        for i in range(start_idx, end_idx):
+            y = offset_y + (i - start_idx) * self._row_height
+            item = self._items[i]
+
+            is_selected = (i == self._selected_idx)
+
+            # 选中高亮
+            if is_selected:
+                c.create_rectangle(
+                    0, y, cw, y + self._row_height,
+                    fill="#2A5A2A", outline="", tags=("row", f"row_{i}"))
+            else:
+                # 行背景透明
+                pass
+
+            # 图标
+            icon = self._file_icon(item)
+            name_x = self._pad_x + 4
+            c.create_text(
+                name_x, y + self._row_height // 2,
+                text=f"{icon}  {item['name']}", anchor="w",
+                fill="#C9D1D9", font=("Segoe UI", 12),
+                tags=("row", f"row_{i}"))
+
+            # 大小
+            size_x = self._pad_x + col_name + 10
+            c.create_text(
+                size_x + col_size, y + self._row_height // 2,
+                text=self._format_size(item), anchor="e",
+                fill="#8B949E", font=("Segoe UI", 11),
+                tags=("row", f"row_{i}"))
+
+            # 时间
+            time_x = size_x + col_size + col_time + 10
+            try:
+                ts = datetime.datetime.fromtimestamp(item["mtime"]).strftime(
+                    "%Y-%m-%d %H:%M")
+            except Exception:
+                ts = "--"
+            c.create_text(
+                time_x, y + self._row_height // 2,
+                text=ts, anchor="e",
+                fill="#8B949E", font=("Segoe UI", 11),
+                tags=("row", f"row_{i}"))
+
+        # 滚动条指示
+        if total > visible:
+            bar_w = 4
+            bar_x = cw - bar_w - 4
+            bar_h = max(20, int(ch * visible / total))
+            bar_y = int((ch - bar_h) * self._scroll_y / max(1, max_scroll))
+            c.create_rectangle(
+                bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
+                fill="#555555", outline="", tags="scrollbar")
+
+    @staticmethod
+    def _file_icon(item: dict) -> str:
+        name = item["name"]
+        if item["is_dir"]:
+            return "📁"
+        ext_map = {
+            ".py": "🐍", ".py3": "🐍", ".sh": "📜", ".bash": "📜",
+            ".txt": "📝", ".md": "📝", ".log": "📝",
+            ".conf": "📝", ".cfg": "📝", ".json": "📝",
+            ".jpg": "🖼️", ".jpeg": "🖼️", ".png": "🖼️",
+            ".gif": "🖼️", ".bmp": "🖼️", ".webp": "🖼️",
+            ".zip": "📦", ".tar": "📦", ".gz": "📦",
+            ".bz2": "📦", ".xz": "📦", ".7z": "📦",
+            ".mp3": "🎵", ".wav": "🎵", ".ogg": "🎵", ".flac": "🎵",
+            ".mp4": "🎬", ".avi": "🎬", ".mkv": "🎬", ".mov": "🎬",
+        }
+        for ext, icon in ext_map.items():
+            if name.endswith(ext):
+                return icon
+        return "📄"
+
+    @staticmethod
+    def _format_size(item: dict) -> str:
+        if item["is_dir"]:
+            return "--"
+        size = item["size"]
+        if size >= 1073741824:
+            return f"{size/1073741824:.1f} GB"
+        elif size >= 1048576:
+            return f"{size/1048576:.1f} MB"
+        elif size >= 1024:
+            return f"{size/1024:.1f} KB"
+        return f"{size} B"
+
+    def _scroll(self, dy: int):
+        self._scroll_y += dy
+        self._redraw()
+
+    def _on_mousewheel(self, event):
+        if event.delta > 0:
+            self._scroll(-40)
+        elif event.delta < 0:
+            self._scroll(40)
+
+    def _get_row_at_y(self, y: int) -> int:
+        idx = (self._scroll_y + y) // self._row_height
+        if 0 <= idx < len(self._items):
+            return idx
+        return -1
+
+    def _on_canvas_click(self, event):
+        idx = self._get_row_at_y(event.y)
+        if idx >= 0:
+            self._selected_idx = idx
+            self._redraw()
+            if self.on_click:
+                self.on_click(idx, self._items[idx])
+
+    def _on_canvas_double(self, event):
+        idx = self._get_row_at_y(event.y)
+        if idx >= 0:
+            self._selected_idx = idx
+            self._redraw()
+            if self.on_double_click:
+                self.on_double_click(self._items[idx])
+
+    def _on_canvas_right(self, event):
+        idx = self._get_row_at_y(event.y)
+        if idx >= 0:
+            self._selected_idx = idx
+            self._redraw()
+            if self.on_right_click:
+                self.on_right_click(event, self._items[idx])
+
+    def get_selected(self):
+        if 0 <= self._selected_idx < len(self._items):
+            return self._items[self._selected_idx]
+        return None
 
 
 class FileBrowser(ctk.CTkFrame):
     """远程文件管理器"""
 
-    def __init__(self, master, ssh_client, config: dict = None):
+    def __init__(self, master, ssh_client, config: dict = None, app_ref=None):
         super().__init__(master, fg_color="transparent", corner_radius=0)
         self._ssh = ssh_client
         self._config = config or {}
+        self._app = app_ref
         self._current_path = "/home/chenxi"
         self._selected_file = None
-        self._history = []  # 导航历史
+        self._selected_item = None
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)  # 路径栏
         self.grid_rowconfigure(1, weight=0)  # 表头
         self.grid_rowconfigure(2, weight=1)  # 文件列表
         self.grid_rowconfigure(3, weight=0)  # 操作栏
-        self.grid_rowconfigure(4, weight=0)  # 进度条
+        self.grid_rowconfigure(4, weight=0)  # 进度/状态
 
         self._build_widgets()
 
     def _build_widgets(self):
         """构建 UI"""
-        # ===== 路径导航栏 =====
-        nav_frame = ctk.CTkFrame(self)
-        nav_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
-        nav_frame.grid_columnconfigure(1, weight=1)
+        # ===== 路径导航栏（卡片包裹） =====
+        nav_card = self._make_card("", 0, sticky="ew", pady=(5, 2))
+        nav_card.grid_columnconfigure(2, weight=1)
 
         self._btn_home = ctk.CTkButton(
-            nav_frame, text="🏠", width=36, command=lambda: self.navigate("/home/chenxi"),
+            nav_card, text="🏠", width=36,
+            command=lambda: self.navigate("/home/chenxi"),
             fg_color="transparent", hover_color="#333")
-        self._btn_home.grid(row=0, column=0, padx=(5, 2), pady=5)
+        self._btn_home.grid(row=0, column=0, padx=(5, 2), pady=4)
 
         self._btn_up = ctk.CTkButton(
-            nav_frame, text="⬆", width=36, command=self._go_up,
+            nav_card, text="⬆", width=36, command=self._go_up,
             fg_color="transparent", hover_color="#333")
-        self._btn_up.grid(row=0, column=1, padx=2, pady=5)
+        self._btn_up.grid(row=0, column=1, padx=2, pady=4)
 
-        self._path_frame = ctk.CTkFrame(nav_frame, fg_color="transparent", corner_radius=0)
+        self._path_frame = ctk.CTkFrame(nav_card, fg_color="transparent", corner_radius=0)
         self._path_frame.grid(row=0, column=2, sticky="ew", padx=5)
 
         self._btn_refresh = ctk.CTkButton(
-            nav_frame, text="🔄", width=36, command=self.refresh,
+            nav_card, text="🔄", width=36, command=self.refresh,
             fg_color="transparent", hover_color="#333")
-        self._btn_refresh.grid(row=0, column=3, padx=(2, 5), pady=5)
+        self._btn_refresh.grid(row=0, column=3, padx=(2, 5), pady=4)
 
         # ===== 文件列表头 =====
-        header_frame = ctk.CTkFrame(self, height=30, fg_color=("gray85", "gray20"))
+        header_frame = ctk.CTkFrame(
+            self, height=30, fg_color="transparent", border_width=1,
+            border_color=("gray55", "gray35"), corner_radius=6)
         header_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 0))
         header_frame.grid_columnconfigure(0, weight=1)
         header_frame.grid_columnconfigure(1, weight=0)
@@ -70,48 +329,75 @@ class FileBrowser(ctk.CTkFrame):
                      font=ctk.CTkFont(size=12, weight="bold")).grid(
             row=0, column=2, sticky="e", padx=8, pady=2)
 
-        # ===== 文件列表滚动区 =====
-        self._file_scroll = ctk.CTkScrollableFrame(self, fg_color="transparent", corner_radius=0)
-        self._file_scroll.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
-        self._file_scroll.grid_columnconfigure(0, weight=1)
+        # ===== 文件列表 Canvas 区（真透明，看背景） =====
+        self._file_list = CanvasFileList(
+            self, border_width=1, border_color=("gray55", "gray35"))
+        self._file_list.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
 
-        self._file_rows = []
-        self._selected_row = None
+        # 设置回调
+        self._file_list.on_click = self._on_click
+        self._file_list.on_double_click = self._on_double_click
+        self._file_list.on_right_click = self._on_right_click
 
         # ===== 操作按钮栏 =====
-        btn_frame = ctk.CTkFrame(self)
-        btn_frame.grid(row=3, column=0, sticky="ew", padx=5, pady=(0, 5))
+        btn_card = self._make_card("", 3, sticky="ew", pady=(0, 5))
+        btn_card.grid_columnconfigure(0, weight=1)
 
-        btn_style = {"width": 90, "height": 30}
+        btn_left = ctk.CTkFrame(btn_card, fg_color="transparent", corner_radius=0)
+        btn_left.pack(side="left", padx=4, pady=4)
+
+        btn_right = ctk.CTkFrame(btn_card, fg_color="transparent", corner_radius=0)
+        btn_right.pack(side="right", padx=4, pady=4)
+
+        btn_style = {"width": 85, "height": 28, "font": ctk.CTkFont(size=12)}
+
         self._btn_upload = ctk.CTkButton(
-            btn_frame, text="📤 上传", command=self._upload_file, **btn_style)
-        self._btn_upload.pack(side="left", padx=3)
+            btn_left, text="📤 上传", command=self._upload_file, **btn_style)
+        self._btn_upload.pack(side="left", padx=2)
 
         self._btn_download = ctk.CTkButton(
-            btn_frame, text="📥 下载", command=self._download_selected, **btn_style)
-        self._btn_download.pack(side="left", padx=3)
+            btn_left, text="📥 下载", command=self._download_selected, **btn_style)
+        self._btn_download.pack(side="left", padx=2)
+
+        self._btn_run = ctk.CTkButton(
+            btn_left, text="▶ 运行", command=self._run_selected, **btn_style,
+            fg_color="#1E5A1E", hover_color="#2A6A2A")
+        self._btn_run.pack(side="left", padx=2)
 
         self._btn_mkdir = ctk.CTkButton(
-            btn_frame, text="📁 新建文件夹", command=self._create_dir, **btn_style)
-        self._btn_mkdir.pack(side="left", padx=3)
-
-        self._btn_delete = ctk.CTkButton(
-            btn_frame, text="🗑 删除", command=self._delete_selected, **btn_style,
-            fg_color="#8B0000", hover_color="#A00000")
-        self._btn_delete.pack(side="left", padx=3)
+            btn_right, text="📁 新建文件夹", command=self._create_dir, **btn_style)
+        self._btn_mkdir.pack(side="left", padx=2)
 
         self._btn_rename = ctk.CTkButton(
-            btn_frame, text="✏️ 重命名", command=self._rename_selected, **btn_style)
-        self._btn_rename.pack(side="left", padx=3)
+            btn_right, text="✏️ 重命名", command=self._rename_selected, **btn_style)
+        self._btn_rename.pack(side="left", padx=2)
 
-        # ===== 进度条 =====
+        self._btn_delete = ctk.CTkButton(
+            btn_right, text="🗑 删除", command=self._delete_selected, **btn_style,
+            fg_color="#8B0000", hover_color="#A00000")
+        self._btn_delete.pack(side="left", padx=2)
+
+        # ===== 进度条 + 状态 =====
         self._progress = ctk.CTkProgressBar(self)
-        self._progress.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 5))
+        self._progress.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 2))
         self._progress.set(0)
-        self._progress.grid_remove()  # 默认隐藏
+        self._progress.grid_remove()
 
-        self._lbl_progress = ctk.CTkLabel(self, text="", text_color="gray")
-        self._lbl_progress.grid(row=4, column=0, sticky="e", padx=15, pady=(0, 5))
+        self._lbl_progress = ctk.CTkLabel(self, text="", text_color="gray",
+                                          font=ctk.CTkFont(size=11))
+        self._lbl_progress.grid(row=4, column=0, sticky="e", padx=15, pady=(0, 2))
+
+    def _make_card(self, title: str, row: int, sticky="ew", **grid_kw):
+        """统一卡片容器 — 透明背景 + 细边框，背景图穿透"""
+        frame = ctk.CTkFrame(
+            self, fg_color="transparent", border_width=1,
+            border_color=("gray55", "gray35"), corner_radius=8)
+        frame.grid(row=row, column=0, sticky=sticky, **grid_kw)
+        if title:
+            ctk.CTkLabel(frame, text=title,
+                         font=ctk.CTkFont(size=12, weight="bold"),
+                         anchor="w").pack(anchor="w", padx=10, pady=(6, 2))
+        return frame
 
     # ===== 导航 =====
 
@@ -119,6 +405,7 @@ class FileBrowser(ctk.CTkFrame):
         """导航到指定路径"""
         self._current_path = path
         self._selected_file = None
+        self._selected_item = None
         self.refresh()
 
     def _go_up(self):
@@ -130,10 +417,8 @@ class FileBrowser(ctk.CTkFrame):
     def refresh(self):
         """刷新当前目录"""
         if not self._ssh.connected:
-            self._show_empty("未连接到树莓派")
+            self._show_empty("🔴 未连接到树莓派，请先连接")
             return
-
-        self._show_empty("加载中...")
 
         def _fetch():
             items = self._ssh.list_dir(self._current_path)
@@ -143,67 +428,18 @@ class FileBrowser(ctk.CTkFrame):
 
     def _render_files(self, items: list):
         """渲染文件列表"""
-        # 清除旧行
-        for row in self._file_rows:
-            row.destroy()
-        self._file_rows.clear()
-        self._selected_row = None
         self._selected_file = None
+        self._selected_item = None
 
-        # 更新面包屑
         self._update_breadcrumb()
 
         if not items:
-            self._show_empty("目录为空")
+            # 显示空状态
+            self._file_list._items = []
+            self._file_list._redraw()
             return
 
-        for i, item in enumerate(items):
-            row_frame = ctk.CTkFrame(
-                self._file_scroll, fg_color="transparent",
-                corner_radius=4)
-            row_frame.grid(row=i, column=0, sticky="ew", pady=1)
-            row_frame.grid_columnconfigure(0, weight=1)
-
-            # 图标 + 名称
-            icon = "📁" if item["is_dir"] else "📄"
-            name_label = ctk.CTkLabel(
-                row_frame, text=f" {icon}  {item['name']}", anchor="w",
-                font=ctk.CTkFont(size=13))
-            name_label.grid(row=0, column=0, sticky="w", padx=8, pady=3)
-
-            # 大小
-            if item["is_dir"]:
-                size_str = "--"
-            else:
-                size = item["size"]
-                if size >= 1073741824:
-                    size_str = f"{size/1073741824:.1f} GB"
-                elif size >= 1048576:
-                    size_str = f"{size/1048576:.1f} MB"
-                elif size >= 1024:
-                    size_str = f"{size/1024:.1f} KB"
-                else:
-                    size_str = f"{size} B"
-            ctk.CTkLabel(row_frame, text=size_str, width=90, anchor="e",
-                         font=ctk.CTkFont(size=12)).grid(
-                row=0, column=1, sticky="e", padx=8)
-
-            # 修改时间
-            try:
-                mtime = datetime.datetime.fromtimestamp(item["mtime"]).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                mtime = "--"
-            ctk.CTkLabel(row_frame, text=mtime, width=160, anchor="e",
-                         font=ctk.CTkFont(size=12)).grid(
-                row=0, column=2, sticky="e", padx=8)
-
-            # 绑定点击事件
-            for widget in [row_frame, name_label]:
-                widget.bind("<Button-1>", lambda e, idx=i, it=item: self._on_click(e, idx, it))
-                widget.bind("<Double-Button-1>", lambda e, it=item: self._on_double_click(it))
-                widget.bind("<Button-3>", lambda e, it=item: self._on_right_click(e, it))
-
-            self._file_rows.append(row_frame)
+        self._file_list.set_items(items)
 
     def _update_breadcrumb(self):
         """更新面包屑导航"""
@@ -217,8 +453,7 @@ class FileBrowser(ctk.CTkFrame):
         btn = ctk.CTkButton(
             self._path_frame, text=" / ", width=30, height=24,
             font=ctk.CTkFont(size=12), fg_color="transparent",
-            hover_color="#333",
-            command=lambda: self.navigate("/"))
+            hover_color="#333", command=lambda: self.navigate("/"))
         btn.pack(side="left", padx=1)
 
         for part in parts:
@@ -230,26 +465,20 @@ class FileBrowser(ctk.CTkFrame):
             btn = ctk.CTkButton(
                 self._path_frame, text=f" {part} ", height=24,
                 font=ctk.CTkFont(size=12), fg_color="transparent",
-                hover_color="#333",
-                command=lambda p=path_so_far: self.navigate(p))
+                hover_color="#333", command=lambda p=path_so_far: self.navigate(p))
             btn.pack(side="left", padx=1)
 
     def _show_empty(self, msg: str):
-        """显示空状态"""
-        for row in self._file_rows:
-            row.destroy()
-        self._file_rows.clear()
-        lbl = ctk.CTkLabel(self._file_scroll, text=msg, text_color="gray",
-                           font=ctk.CTkFont(size=14))
-        lbl.grid(row=0, column=0, pady=30)
-        self._file_rows.append(lbl)
+        """显示空状态（CanvasFileList 中处理）"""
+        self._file_list._items = []
+        self._file_list._redraw()
 
     # ===== 点击事件 =====
 
-    def _on_click(self, event, index: int, item: dict):
+    def _on_click(self, index: int, item: dict):
         """单击选择"""
-        self._select_row(index)
         self._selected_file = item["name"]
+        self._selected_item = item
 
     def _on_double_click(self, item: dict):
         """双击进入目录或下载文件"""
@@ -258,31 +487,30 @@ class FileBrowser(ctk.CTkFrame):
             self.navigate(new_path)
         else:
             self._selected_file = item["name"]
+            self._selected_item = item
             self._download_selected()
 
     def _on_right_click(self, event, item: dict):
         """右键菜单"""
         self._selected_file = item["name"]
+        self._selected_item = item
         menu = Menu(self, tearoff=0, bg="#2B2B2B", fg="white",
                     activebackground="#444", activeforeground="white")
         menu.add_command(label="📥 下载", command=self._download_selected)
+        if not item["is_dir"]:
+            menu.add_command(label="▶ 运行", command=self._run_selected)
         menu.add_separator()
         if item["is_dir"]:
-            menu.add_command(label="📁 进入", command=lambda: self._on_double_click(item))
+            menu.add_command(label="📁 进入",
+                             command=lambda: self._on_double_click(item))
         menu.add_command(label="✏️ 重命名", command=self._rename_selected)
         menu.add_command(label="🗑 删除", command=self._delete_selected)
         menu.add_separator()
-        menu.add_command(label="📁 新建文件夹", command=self._create_dir)
+        menu.add_command(label="📂 新建文件夹", command=self._create_dir)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
-
-    def _select_row(self, index: int):
-        """高亮选中行"""
-        for i, row in enumerate(self._file_rows):
-            if isinstance(row, ctk.CTkFrame):
-                row.configure(fg_color="#2A5A2A" if i == index else "transparent")
 
     # ===== 文件操作 =====
 
@@ -310,7 +538,8 @@ class FileBrowser(ctk.CTkFrame):
         remote_path = f"{self._current_path}/{self._selected_file}"
         info = self._ssh.get_file_info(remote_path)
         if info and info["is_dir"]:
-            messagebox.showinfo("提示", "暂不支持下载目录，请使用 tar 打包后下载")
+            messagebox.showinfo(
+                "提示", "暂不支持下载目录，请使用终端执行 tar 打包后下载")
             return
         local_dir = filedialog.askdirectory(title="选择保存位置")
         if not local_dir:
@@ -318,11 +547,89 @@ class FileBrowser(ctk.CTkFrame):
         local_path = os.path.join(local_dir, self._selected_file)
         self._do_transfer("download", remote_path, local_path)
 
+    def _run_selected(self):
+        """在树莓派上执行选中的脚本文件"""
+        if not self._ssh.connected:
+            messagebox.showwarning("未连接", "请先连接到树莓派")
+            return
+        if not self._selected_file:
+            messagebox.showinfo("提示", "请先选择要运行的文件")
+            return
+        if self._selected_item and self._selected_item.get("is_dir"):
+            messagebox.showinfo("提示", "不能运行目录，请选择一个脚本文件")
+            return
+
+        remote_path = f"{self._current_path}/{self._selected_file}"
+
+        # 根据扩展名确定执行方式
+        ext = os.path.splitext(self._selected_file)[1].lower()
+        if ext in (".py", ".py3"):
+            run_cmd = f"python3 '{remote_path}'"
+        elif ext in (".sh", ".bash"):
+            run_cmd = f"bash '{remote_path}'"
+        else:
+            run_cmd = f"chmod +x '{remote_path}' && '{remote_path}'"
+
+        # 切换到终端页面并执行
+        if self._app and hasattr(self._app, '_terminal_page'):
+            self._app._show_page("terminal")
+            # 新建一个终端标签来执行
+            self._app._terminal_page._add_session(f"运行: {self._selected_file[:12]}")
+            # 将命令填入当前终端
+            if self._app._terminal_page._tabs:
+                tab = self._app._terminal_page._tabs[-1]
+                tab._entry.insert(0, run_cmd)
+                tab._entry.focus_set()
+        else:
+            # 直接在当前页面执行并显示结果
+            self._lbl_progress.configure(text=f"执行: {self._selected_file}...")
+            self._progress.grid()
+            self._progress.set(0)
+            self._progress.configure(mode="indeterminate")
+            self._progress.start()
+
+            def _run():
+                code, out, err = self._ssh.exec_command(run_cmd, timeout=120)
+                self.after(0, lambda: self._on_run_result(out, err, code))
+
+            threading.Thread(target=_run, daemon=True).start()
+
+    def _on_run_result(self, stdout: str, stderr: str, exit_code: int):
+        """运行结果回调"""
+        self._progress.stop()
+        self._progress.configure(mode="determinate")
+        self._progress.grid_remove()
+        status = "✓ 成功" if exit_code == 0 else f"✗ 退出码: {exit_code}"
+        self._lbl_progress.configure(text=status)
+
+        # 弹出结果对话框
+        result = f"━━━ 标准输出 ━━━\n{stdout or '(无输出)'}"
+        if stderr:
+            result += f"\n\n━━━ 错误输出 ━━━\n{stderr}"
+        result += f"\n\n退出码: {exit_code}"
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"运行结果: {self._selected_file}")
+        dialog.geometry("700x500")
+        dialog.transient(self)
+
+        output = ctk.CTkTextbox(
+            dialog, font=ctk.CTkFont(family="Consolas", size=12),
+            fg_color="#0D1117", text_color="#C9D1D9", wrap="word")
+        output.pack(fill="both", expand=True, padx=10, pady=10)
+        output.insert("1.0", result)
+        output.configure(state="disabled")
+
+        ctk.CTkButton(
+            dialog, text="关闭", command=dialog.destroy, width=80
+        ).pack(pady=(0, 10))
+
     def _do_transfer(self, direction: str, src: str, dst: str):
         """执行文件传输"""
         self._progress.set(0)
         self._progress.grid()
-        self._lbl_progress.configure(text=f"{'上传' if direction == 'upload' else '下载'}中...")
+        self._lbl_progress.configure(
+            text=f"{'📤 上传' if direction == 'upload' else '📥 下载'}中...")
 
         def _progress_cb(transferred, total):
             if total > 0:
@@ -341,19 +648,20 @@ class FileBrowser(ctk.CTkFrame):
     def _on_transfer_done(self, ok: bool, msg: str):
         """传输完成回调"""
         self._progress.grid_remove()
-        self._lbl_progress.configure(text="")
+        if ok:
+            self._lbl_progress.configure(text="✓ 传输完成")
+        else:
+            self._lbl_progress.configure(text=f"✗ {msg}")
+        self.after(3000, lambda: self._lbl_progress.configure(text=""))
         if ok:
             self.refresh()
-        else:
-            messagebox.showerror("传输失败", msg)
 
     def _create_dir(self):
         """创建远程目录"""
         if not self._ssh.connected:
             messagebox.showwarning("未连接", "请先连接到树莓派")
             return
-        dialog = ctk.CTkInputDialog(
-            text="输入文件夹名称:", title="新建文件夹")
+        dialog = ctk.CTkInputDialog(text="输入文件夹名称:", title="新建文件夹")
         name = dialog.get_input()
         if name:
             path = f"{self._current_path}/{name}"
@@ -371,7 +679,10 @@ class FileBrowser(ctk.CTkFrame):
         if not self._selected_file:
             messagebox.showinfo("提示", "请先选择要删除的文件")
             return
-        if messagebox.askyesno("确认删除", f"确定要删除 \"{self._selected_file}\" 吗？\n此操作不可恢复！"):
+        if messagebox.askyesno(
+            "确认删除",
+            f"确定要删除 \"{self._selected_file}\" 吗？\n此操作不可恢复！"
+        ):
             path = f"{self._current_path}/{self._selected_file}"
             ok, msg = self._ssh.delete_remote(path)
             if ok:
@@ -387,8 +698,7 @@ class FileBrowser(ctk.CTkFrame):
         if not self._selected_file:
             messagebox.showinfo("提示", "请先选择要重命名的文件")
             return
-        dialog = ctk.CTkInputDialog(
-            text="输入新名称:", title="重命名")
+        dialog = ctk.CTkInputDialog(text="输入新名称:", title="重命名")
         new_name = dialog.get_input()
         if new_name and new_name != self._selected_file:
             old_path = f"{self._current_path}/{self._selected_file}"
@@ -398,41 +708,3 @@ class FileBrowser(ctk.CTkFrame):
                 self.refresh()
             else:
                 messagebox.showerror("重命名失败", msg)
-
-
-if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, "..")
-    from pimanager.ssh_client import SSHClient
-
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("green")
-
-    class TestWindow(ctk.CTk):
-        def __init__(self):
-            super().__init__()
-            self.title("FileBrowser 测试")
-            self.geometry("900x650")
-            self.grid_columnconfigure(0, weight=1)
-            self.grid_rowconfigure(0, weight=1)
-
-            self.ssh = SSHClient()
-            self.browser = FileBrowser(self, self.ssh)
-            self.browser.grid(row=0, column=0, sticky="nsew")
-
-            ok, msg = self.ssh.connect(
-                host="muchenxi-20081128.local",
-                username="chenxi",
-                key_path=r"C:\Users\m2008\.ssh\id_ed25519"
-            )
-            print(f"连接: {msg}")
-            if ok:
-                self.browser.refresh()
-
-        def on_close(self):
-            self.ssh.disconnect()
-            self.destroy()
-
-    app = TestWindow()
-    app.protocol("WM_DELETE_WINDOW", app.on_close)
-    app.mainloop()
