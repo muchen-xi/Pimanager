@@ -132,40 +132,7 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         """把背景图片片段绘制到内部 canvas 上。"""
         try:
             from .app import BackgroundManager
-            if not BackgroundManager._enabled:
-                return
-            pil_full = getattr(BackgroundManager, '_bg_pil_blended', None)
-            if pil_full is None:
-                return
-            content = BackgroundManager._content_frame
-            if content is None:
-                return
-            c = self._canvas
-            cw = c.winfo_width()
-            ch = c.winfo_height()
-            if cw < 20 or ch < 20:
-                return
-            wx = c.winfo_rootx() - content.winfo_rootx()
-            wy = c.winfo_rooty() - content.winfo_rooty()
-            from PIL import ImageTk
-            left = max(0, int(wx))
-            top = max(0, int(wy))
-            right = min(pil_full.width, int(wx + cw))
-            bottom = min(pil_full.height, int(wy + ch))
-            if right > left and bottom > top:
-                cropped = pil_full.crop((left, top, right, bottom))
-                tk_img = ImageTk.PhotoImage(cropped)
-                # 保持引用
-                if not hasattr(self, '_bg_refs'):
-                    self._bg_refs = []
-                self._bg_refs.append(tk_img)
-                if len(self._bg_refs) > 10:
-                    self._bg_refs = self._bg_refs[-5:]
-                c.delete("bg_fragment")
-                dx = -int(wx) if wx < 0 else 0
-                dy = -int(wy) if wy < 0 else 0
-                c.create_image(dx, dy, anchor="nw", image=tk_img, tags="bg_fragment")
-                c.tag_lower("bg_fragment")
+            BackgroundManager.make_canvas_transparent(self._canvas)
         except Exception:
             pass
 
