@@ -6,6 +6,7 @@ import threading
 import os
 import datetime
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, Menu
 
 
@@ -234,8 +235,158 @@ class CanvasFileList(ctk.CTkFrame):
         return None
 
 
+# ===== 本地文件列表（复制 CanvasFileList 的渲染模式） =====
+
+class LocalFileList(ctk.CTkFrame):
+    """本地文件列表 — 完全复用 CanvasFileList 的 Canvas 渲染逻辑。"""
+
+    def __init__(self, master, **kwargs):
+        super().__init__(master, fg_color="transparent", corner_radius=0, **kwargs)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self._canvas = tk.Canvas(self, highlightthickness=0, bd=0, bg="#0D1117")
+        self._canvas.grid(row=0, column=0, sticky="nsew")
+        self._items: list[dict] = []
+        self._row_height = 32
+        self._selected_idx = -1
+        self._pad_x = 8
+        self._scroll_y = 0
+        self._current_path = str(Path.home())
+        self.on_click = None
+        self.on_double_click = None
+        self.on_right_click = None
+        self._canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self._canvas.bind("<Button-4>", lambda e: self._scroll(-60))
+        self._canvas.bind("<Button-5>", lambda e: self._scroll(60))
+        self._canvas.bind("<Button-1>", self._on_canvas_click)
+        self._canvas.bind("<Double-Button-1>", self._on_canvas_double)
+        self._canvas.bind("<Button-3>", self._on_canvas_right)
+        self.bind("<Configure>", self._on_resize)
+        self._bg_refs = []
+
+    @property
+    def current_path(self):
+        return self._current_path
+
+    def navigate(self, path: str):
+        self._current_path = path
+        self.refresh()
+
+    def go_up(self):
+        parent = str(Path(self._current_path).parent)
+        if parent and parent != self._current_path:
+            self.navigate(parent)
+
+    def refresh(self):
+        def _load():
+            items = []
+            try:
+                with os.scandir(self._current_path) as it:
+                    for entry in it:
+                        try:
+                            st = entry.stat()
+                        except OSError:
+                            continue
+                        items.append({"name": entry.name, "size": st.st_size,
+                                       "mtime": st.st_mtime, "is_dir": entry.is_dir()})
+            except PermissionError:
+                pass
+            items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+            self.after(0, lambda: self.set_items(items))
+        threading.Thread(target=_load, daemon=True).start()
+
+    def set_items(self, items: list[dict]):
+        self._items = items
+        self._selected_idx = -1
+        self._scroll_y = 0
+        self._redraw()
+
+    def _on_resize(self, event=None):
+        self._redraw()
+
+    def _apply_bg(self):
+        try:
+            from .app import BackgroundManager
+            BackgroundManager.make_canvas_transparent(self._canvas)
+        except Exception:
+            pass
+
+    def _redraw(self):
+        c = self._canvas
+        c.delete("row")
+        c.delete("scrollbar")
+        if not self._items:
+            return
+        self._apply_bg()
+        cw = c.winfo_width(); ch = c.winfo_height()
+        if cw < 20: return
+        col_size, col_time = 90, 160
+        col_name = cw - col_size - col_time - self._pad_x * 4
+        total = len(self._items)
+        visible = max(1, ch // self._row_height)
+        max_scroll = max(0, total * self._row_height - ch)
+        self._scroll_y = max(0, min(self._scroll_y, max_scroll))
+        start = self._scroll_y // self._row_height
+        end = min(total, start + visible + 1)
+        off = -(self._scroll_y % self._row_height)
+        for i in range(start, end):
+            y = off + (i - start) * self._row_height
+            item = self._items[i]
+            if i == self._selected_idx:
+                c.create_rectangle(0, y, cw, y + self._row_height,
+                                   fill="#2A5A2A", outline="", tags=("row", f"row_{i}"))
+            icon = CanvasFileList._file_icon(item)
+            sz = CanvasFileList._format_size(item)
+            c.create_text(self._pad_x + 4, y + self._row_height // 2,
+                          text=f"{icon}  {item['name']}", anchor="w",
+                          fill="#8BCCFF", font=("Segoe UI", 12),
+                          tags=("row", f"row_{i}"))
+            sx = self._pad_x + col_name + 10
+            c.create_text(sx + col_size, y + self._row_height // 2,
+                          text=sz, anchor="e", fill="#8B949E",
+                          font=("Segoe UI", 11), tags=("row", f"row_{i}"))
+            tx = sx + col_size + col_time + 10
+            try:
+                ts = datetime.datetime.fromtimestamp(item["mtime"]).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                ts = "--"
+            c.create_text(tx, y + self._row_height // 2, text=ts,
+                          anchor="e", fill="#8B949E", font=("Segoe UI", 11),
+                          tags=("row", f"row_{i}"))
+        if total > visible:
+            bar_w, bar_x = 4, cw - 8
+            bar_h = max(20, int(ch * visible / total))
+            bar_y = int((ch - bar_h) * self._scroll_y / max(1, max_scroll))
+            c.create_rectangle(bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
+                               fill="#555555", outline="", tags="scrollbar")
+
+    def _scroll(self, dy): self._scroll_y += dy; self._redraw()
+    def _on_mousewheel(self, event):
+        self._scroll(-40 if event.delta > 0 else 40)
+    def _get_row_at_y(self, y):
+        idx = (self._scroll_y + y) // self._row_height
+        return idx if 0 <= idx < len(self._items) else -1
+    def _on_canvas_click(self, event):
+        idx = self._get_row_at_y(event.y)
+        if idx >= 0:
+            self._selected_idx = idx; self._redraw()
+            if self.on_click: self.on_click(idx, self._items[idx])
+    def _on_canvas_double(self, event):
+        idx = self._get_row_at_y(event.y)
+        if idx >= 0:
+            self._selected_idx = idx; self._redraw()
+            if self.on_double_click: self.on_double_click(self._items[idx])
+    def _on_canvas_right(self, event):
+        idx = self._get_row_at_y(event.y)
+        if idx >= 0:
+            self._selected_idx = idx; self._redraw()
+            if self.on_right_click: self.on_right_click(event, self._items[idx])
+    def get_selected(self):
+        return self._items[self._selected_idx] if 0 <= self._selected_idx < len(self._items) else None
+
+
 class FileBrowser(ctk.CTkFrame):
-    """远程文件管理器"""
+    """远程文件管理器 — 支持单栏/双栏模式"""
 
     def __init__(self, master, ssh_client, config: dict = None, app_ref=None):
         super().__init__(master, fg_color="transparent", corner_radius=0)
@@ -245,6 +396,8 @@ class FileBrowser(ctk.CTkFrame):
         self._current_path = "/home/chenxi"
         self._selected_file = None
         self._selected_item = None
+        self._mode = "single"  # single / dual
+        self._local_path = str(Path.home())
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)  # 路径栏
@@ -261,24 +414,31 @@ class FileBrowser(ctk.CTkFrame):
         nav_card = self._make_card("", 0, sticky="ew", pady=(5, 2))
         nav_card.grid_columnconfigure(2, weight=1)
 
+        # ★ 双栏模式切换按钮
+        self._btn_mode = ctk.CTkButton(
+            nav_card, text="📂 双栏", width=70, height=28,
+            font=ctk.CTkFont(size=11), command=self._toggle_mode,
+            fg_color="#1E3A5A", hover_color="#2A4A6A")
+        self._btn_mode.grid(row=0, column=0, padx=(5, 2), pady=4)
+
         self._btn_home = ctk.CTkButton(
             nav_card, text="🏠", width=36,
             command=lambda: self.navigate("/home/chenxi"),
             fg_color="transparent", hover_color="#333")
-        self._btn_home.grid(row=0, column=0, padx=(5, 2), pady=4)
+        self._btn_home.grid(row=0, column=1, padx=2, pady=4)
 
         self._btn_up = ctk.CTkButton(
             nav_card, text="⬆", width=36, command=self._go_up,
             fg_color="transparent", hover_color="#333")
-        self._btn_up.grid(row=0, column=1, padx=2, pady=4)
+        self._btn_up.grid(row=0, column=2, padx=2, pady=4)
 
         self._path_frame = ctk.CTkFrame(nav_card, fg_color="transparent", corner_radius=0)
-        self._path_frame.grid(row=0, column=2, sticky="ew", padx=5)
+        self._path_frame.grid(row=0, column=3, sticky="ew", padx=5)
 
         self._btn_refresh = ctk.CTkButton(
             nav_card, text="🔄", width=36, command=self.refresh,
             fg_color="transparent", hover_color="#333")
-        self._btn_refresh.grid(row=0, column=3, padx=(2, 5), pady=4)
+        self._btn_refresh.grid(row=0, column=4, padx=(2, 5), pady=4)
 
         # ===== 文件列表头 =====
         header_frame = ctk.CTkFrame(
@@ -299,15 +459,31 @@ class FileBrowser(ctk.CTkFrame):
                      font=ctk.CTkFont(size=12, weight="bold")).grid(
             row=0, column=2, sticky="e", padx=8, pady=2)
 
-        # ===== 文件列表 Canvas 区（真透明，看背景） =====
+        # ===== 文件列表容器 =====
+        self._list_container = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
+        self._list_container.grid(row=2, column=0, sticky="nsew", padx=2, pady=(0, 5))
+        self._list_container.grid_columnconfigure(0, weight=1)
+        self._list_container.grid_columnconfigure(1, weight=0)
+        self._list_container.grid_rowconfigure(0, weight=1)
+
+        # 远程列表
         self._file_list = CanvasFileList(
-            self, border_width=1, border_color=("gray55", "gray35"))
-        self._file_list.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
+            self._list_container, border_width=1, border_color=("gray55", "gray35"))
+        self._file_list.grid(row=0, column=0, sticky="nsew")
 
         # 设置回调
         self._file_list.on_click = self._on_click
         self._file_list.on_double_click = self._on_double_click
         self._file_list.on_right_click = self._on_right_click
+
+        # ★ 本地列表（双栏模式下显示）
+        self._local_list = LocalFileList(
+            self._list_container, border_width=1, border_color=("gray55", "gray35"))
+        self._local_list.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        self._local_list.grid_remove()
+        self._local_list.on_click = self._on_local_click
+        self._local_list.on_double_click = self._on_local_double
+        self._local_list.on_right_click = self._on_local_right
 
         # ===== 操作按钮栏 =====
         btn_card = self._make_card("", 3, sticky="ew", pady=(0, 5))
@@ -315,6 +491,9 @@ class FileBrowser(ctk.CTkFrame):
 
         btn_left = ctk.CTkFrame(btn_card, fg_color="transparent", corner_radius=0)
         btn_left.pack(side="left", padx=4, pady=4)
+
+        btn_mid = ctk.CTkFrame(btn_card, fg_color="transparent", corner_radius=0)
+        btn_mid.pack(side="left", padx=4, pady=4)
 
         btn_right = ctk.CTkFrame(btn_card, fg_color="transparent", corner_radius=0)
         btn_right.pack(side="right", padx=4, pady=4)
@@ -333,6 +512,21 @@ class FileBrowser(ctk.CTkFrame):
             btn_left, text="▶ 运行", command=self._run_selected, **btn_style,
             fg_color="#1E5A1E", hover_color="#2A6A2A")
         self._btn_run.pack(side="left", padx=2)
+
+        # ★ 双栏传输按钮（默认隐藏）
+        self._btn_to_local = ctk.CTkButton(
+            btn_mid, text="← 下载到本地", command=self._download_to_local,
+            width=110, height=28, font=ctk.CTkFont(size=12),
+            fg_color="#1E3A5A", hover_color="#2A4A6A")
+        self._btn_to_local.pack(side="left", padx=2)
+        self._btn_to_local.pack_forget()
+
+        self._btn_to_remote = ctk.CTkButton(
+            btn_mid, text="上传到树莓派 →", command=self._upload_from_local,
+            width=110, height=28, font=ctk.CTkFont(size=12),
+            fg_color="#1E3A5A", hover_color="#2A4A6A")
+        self._btn_to_remote.pack(side="left", padx=2)
+        self._btn_to_remote.pack_forget()
 
         self._btn_mkdir = ctk.CTkButton(
             btn_right, text="📁 新建文件夹", command=self._create_dir, **btn_style)
@@ -625,6 +819,8 @@ class FileBrowser(ctk.CTkFrame):
         self.after(3000, lambda: self._lbl_progress.configure(text=""))
         if ok:
             self.refresh()
+            if self._mode == "dual":
+                self._local_list.refresh()
 
     def _create_dir(self):
         """创建远程目录"""
@@ -678,3 +874,75 @@ class FileBrowser(ctk.CTkFrame):
                 self.refresh()
             else:
                 messagebox.showerror("重命名失败", msg)
+
+    # ===== 双栏模式 =====
+
+    def _toggle_mode(self):
+        """切换单栏/双栏模式。"""
+        if self._mode == "single":
+            self._mode = "dual"
+            self._btn_mode.configure(text="📂 单栏", fg_color="#2A5A2A", hover_color="#3A6A3A")
+            self._list_container.grid_columnconfigure(1, weight=1)
+            self._local_list.grid()
+            self._btn_to_local.pack(side="left", padx=2)
+            self._btn_to_remote.pack(side="left", padx=2)
+            self._local_list.navigate(self._local_path)
+        else:
+            self._mode = "single"
+            self._btn_mode.configure(text="📂 双栏", fg_color="#1E3A5A", hover_color="#2A4A6A")
+            self._local_list.grid_remove()
+            self._btn_to_local.pack_forget()
+            self._btn_to_remote.pack_forget()
+            self._list_container.grid_columnconfigure(1, weight=0)
+
+    # ===== 本地文件事件 =====
+
+    def _on_local_click(self, index, item):
+        pass
+
+    def _on_local_double(self, item):
+        if item["is_dir"]:
+            self._local_path = os.path.join(self._local_path, item["name"])
+            self._local_list.navigate(self._local_path)
+
+    def _on_local_right(self, event, item):
+        full = os.path.join(self._local_path, item["name"])
+        menu = Menu(self, tearoff=0, bg="#2B2B2B", fg="white",
+                    activebackground="#444", activeforeground="white")
+        menu.add_command(label="→ 上传到树莓派",
+                         command=lambda: self._upload_specific(full))
+        menu.add_command(label="📋 复制路径",
+                         command=lambda: self.clipboard_append(full))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    # ===== 双栏传输 =====
+
+    def _download_to_local(self):
+        """远程选中文件 → 本地当前目录。"""
+        if not self._selected_file or not self._ssh.connected:
+            return
+        remote_path = f"{self._current_path}/{self._selected_file}"
+        local_path = os.path.join(self._local_path, self._selected_file)
+        if os.path.exists(local_path):
+            if not messagebox.askyesno("覆盖确认", f"本地 {self._selected_file} 已存在，覆盖？"):
+                return
+        self._do_transfer("download", remote_path, local_path)
+
+    def _upload_from_local(self):
+        """本地选中文件 → 远程当前目录。"""
+        sel = self._local_list.get_selected()
+        if not sel or not self._ssh.connected:
+            return
+        local_path = os.path.join(self._local_path, sel["name"])
+        remote_path = f"{self._current_path}/{sel['name']}"
+        self._do_transfer("upload", local_path, remote_path)
+
+    def _upload_specific(self, local_path: str):
+        """上传指定本地文件到远程。"""
+        if not self._ssh.connected:
+            return
+        self._do_transfer("upload", local_path,
+                          f"{self._current_path}/{os.path.basename(local_path)}")
