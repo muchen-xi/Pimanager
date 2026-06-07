@@ -7,7 +7,8 @@
 - 🔌 **SSH 密钥连接** — 基于 ed25519/RSA 密钥的安全连接
 - 📊 **实时状态监控** — CPU、温度、内存、磁盘、运行时间、负载
 - 📁 **文件管理器** — 浏览、上传、下载、删除、重命名、新建文件夹
-- 💻 **命令终端** — 执行远程命令，快捷命令按钮，命令历史
+- ▶️ **远程执行** — 运行 Python/Shell 脚本，结果实时返回
+- 💻 **多 Agent 终端** — 多标签独立会话，命令历史，快捷命令
 - 🎨 **可自定义背景** — 支持任意图片作为背景，可调透明度
 - 🌓 **主题切换** — 深色/浅色模式，多色主题（绿色/蓝色/深蓝）
 - ⚡ **轻量高效** — 原生桌面应用，内存占用低
@@ -50,16 +51,18 @@ python -m pimanager.main
 
 ```
 pimanager/
-├── main.py          # 入口文件
-├── app.py           # 主应用窗口（侧边栏、导航、设置）
-├── ssh_client.py    # SSH 客户端（paramiko 封装）
-├── status_panel.py  # 系统状态监控面板
-├── file_browser.py  # 远程文件管理器
-├── config.py        # 配置管理
-├── pimanager.json   # 用户配置文件（自动生成）
-├── requirements.txt # Python 依赖
-├── 启动.bat         # Windows 启动脚本
-└── assets/          # 资源文件
+├── main.py            # 入口文件
+├── app.py             # 主应用窗口（侧边栏、导航、背景管理）
+├── ssh_client.py      # SSH 客户端（paramiko 封装）
+├── status_panel.py    # 系统状态监控面板
+├── file_browser.py    # 远程文件管理器（含远程执行）
+├── terminal_page.py   # 多标签命令终端
+├── settings_page.py   # 应用设置页（卡片式布局）
+├── config.py          # 配置管理
+├── pimanager.json     # 用户配置文件（自动生成）
+├── requirements.txt   # Python 依赖
+├── 启动.bat           # Windows 启动脚本
+└── assets/            # 资源文件
 ```
 
 ## 🎯 使用说明
@@ -74,22 +77,22 @@ pimanager/
 - 自动每 3 秒刷新（可在设置中调整）
 
 ### 文件管理
-- 📤 上传文件到树莓派
-- 📥 下载文件到本地
-- 📁 新建文件夹
-- 🗑 删除 / ✏️ 重命名
+- 📤 上传 / 📥 下载 / ▶ 运行远程脚本
+- 📁 新建文件夹 / 🗑 删除 / ✏️ 重命名
 - 双击目录进入，双击文件下载
+- **▶ 运行**：执行 Python/Shell 脚本，弹出结果窗口
 
 ### 命令终端
-- 输入 Linux 命令直接执行
-- 快捷按钮：状态、文件、磁盘、内存、温度等
-- 🗑 清屏按钮
+- 多标签独立会话（＋ 新建终端）
+- 快捷命令按钮（10 个常用命令）
+- ↑↓ 浏览命令历史
+- 清屏 / 复制全部
 
-### 外观设置
-- 主题：深色/浅色切换
-- 颜色主题：绿色/蓝色/深蓝
-- 背景图片：支持 JPG/PNG，透明度可调
-- 字体缩放
+### 设置
+- 主题模式（深色/浅色）
+- 颜色主题（绿色/蓝色/深蓝）
+- 自定义背景图片 + 透明度调节
+- 字体缩放、自动连接、刷新间隔
 
 ## 🖥️ 技术栈
 
@@ -97,7 +100,6 @@ pimanager/
 - **CustomTkinter** — 现代化桌面 UI
 - **Paramiko** — SSH/SFTP 协议
 - **Pillow** — 图片处理
-- **bcrypt** — 密钥加密
 
 ## 🔧 树莓派 Zero W 配置
 
@@ -112,21 +114,3 @@ Kernel: 6.12.75+rpt-rpi-v6 (armv6l)
 RAM: 427 MB
 Disk: 29 GB
 ```
-
-## 📝 配置说明
-
-配置文件自动保存在 `pimanager.json`，支持：
-
-```json
-{
-  "connections": [{ "name": "...", "host": "...", ... }],
-  "appearance": { "theme": "dark", "background_path": "..." },
-  "behavior": { "auto_connect": false, "refresh_interval": 3 }
-}
-```
-
-## ⚠️ 注意事项
-
-- 树莓派 Zero W 性能有限，建议刷新间隔 ≥ 3 秒
-- 大文件传输时请耐心等待
-- 关闭应用时会自动断开连接

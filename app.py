@@ -3,9 +3,7 @@ PiManager 主应用窗口
 """
 import customtkinter as ctk
 import threading
-import datetime
 import os
-import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
@@ -14,6 +12,341 @@ from .config import load_config, save_config
 from .ssh_client import SSHClient
 from .status_panel import StatusPanel
 from .file_browser import FileBrowser
+from .terminal_page import TerminalPage
+from .settings_page import SettingsPage
+
+
+# ============================================================
+#  BackgroundManager — 全局背景管理
+#  原理：拦截所有 CTk 控件 _draw()，将 inner_parts 透明化
+#  并把背景图片片段绘制到 canvas 底部。
+#  对所有处于 _content 区域内的控件自动生效。
+# ============================================================
+class BackgroundManager:
+    """全局背景管理器。
+
+    通过 monkey-patch 所有 CTk 控件的 _draw() 实现背景穿透。
+    拦截的控件: CTkFrame, CTkTextbox, CTkEntry, CTkButton,
+    CTkLabel, CTkOptionMenu, CTkComboBox, CTkCheckBox,
+    CTkSlider, CTkProgressBar, CTkSwitch。
+    只作用于 _content 区域内，不影响侧边栏和对话框。
+    """
+
+    _bg_path: str = ""
+    _bg_pil = None          # 完整的混合后背景 PIL Image（缓存，避免 getimage）
+    _bg_tk_full = None      # 完整的 PhotoImage
+    _bg_opacity: float = 0.15
+    _content_frame = None
+    _refs: list = []
+    _enabled: bool = False
+    _original_draws: dict = {}  # {widget_class: original_draw_method}
+    _excluded_widgets: set = set()  # 不应用背景的控件（如设置页）
+
+    @classmethod
+    def setup(cls, content_frame):
+        """在应用启动时调用一次：拦截所有 CTk 控件 _draw()。"""
+        cls._content_frame = content_frame
+        if not cls._original_draws:
+            _PATCH_CLASSES = [
+                ctk.CTkFrame,
+                ctk.CTkTextbox,
+                ctk.CTkEntry,
+                ctk.CTkButton,
+                ctk.CTkLabel,
+                ctk.CTkOptionMenu,
+                ctk.CTkComboBox,
+                ctk.CTkCheckBox,
+                ctk.CTkSlider,
+                ctk.CTkProgressBar,
+                ctk.CTkSwitch,
+            ]
+            for wc in _PATCH_CLASSES:
+                if wc in cls._original_draws:
+                    continue
+                original = wc._draw
+                cls._original_draws[wc] = original
+
+                def _make_patched(_orig):
+                    def _draw_patched(self_widget, no_color_updates=False):
+                        _orig(self_widget, no_color_updates)
+                        cls._on_widget_draw(self_widget)
+                    return _draw_patched
+
+                wc._draw = _make_patched(original)
+
+    @classmethod
+    def set_background(cls, path: str, opacity: float):
+        """设置/更换背景图片。"""
+        cls._bg_path = path
+        cls._bg_opacity = opacity
+        cls._refs.clear()
+        if path and os.path.exists(path):
+            try:
+                cls._bg_pil = Image.open(path)
+                cls._enabled = True
+                cls._prepare_full_image()
+                cls._refresh_all_frames()
+            except Exception:
+                cls._enabled = False
+                cls._bg_pil = None
+        else:
+            cls._bg_pil = None
+            cls._bg_tk_full = None
+            cls._enabled = False
+
+    @classmethod
+    def clear(cls):
+        """清除背景图片。"""
+        cls._bg_path = ""
+        cls._bg_pil = None
+        cls._bg_tk_full = None
+        cls._enabled = False
+        cls._refs.clear()
+        if cls._content_frame:
+            cls._clear_all(cls._content_frame)
+            cls._force_draw_descendants(cls._content_frame)
+
+    @classmethod
+    def refresh_size(cls):
+        """窗口大小改变后重新缩放并重绘背景。"""
+        if cls._enabled and cls._bg_pil:
+            cls._prepare_full_image()
+            cls._refresh_all_frames()
+
+    # ---- 内部实现 ----
+
+    @classmethod
+    def _prepare_full_image(cls):
+        """缩放背景图并叠加暗色基底（混合后在内存中保留 PIL Image）。"""
+        if not cls._bg_pil or not cls._content_frame:
+            return
+        cw = cls._content_frame.winfo_width()
+        ch = cls._content_frame.winfo_height()
+        if cw < 50 or ch < 50:
+            cw, ch = 900, 660
+        bg = cls._bg_pil.resize((cw, ch), Image.LANCZOS).convert("RGBA")
+        dark = Image.new("RGBA", (cw, ch), (13, 17, 23, 255))
+        # 混合暗色基底与背景图
+        blended = Image.blend(dark.convert("RGB"), bg.convert("RGB"), cls._bg_opacity)
+        cls._bg_pil_blended = blended   # ★ 缓存 PIL Image，避免 ImageTk.getimage()
+        cls._bg_tk_full = ImageTk.PhotoImage(blended)
+
+    @classmethod
+    def _on_widget_draw(cls, widget):
+        """在控件 _draw() 完成后执行：透明化 + 画背景片段。"""
+        if not cls._enabled or not cls._bg_tk_full:
+            return
+        if not cls._content_frame:
+            return
+        if not cls._is_descendant_of_content(widget):
+            return
+
+        # 处理 CTkScrollableFrame（无 _canvas）或包含 scrollable frame 的容器
+        cls._handle_scrollable_frame(widget)
+
+        if not hasattr(widget, '_canvas'):
+            return
+
+        try:
+            c = widget._canvas
+            if not c.winfo_exists():
+                return
+            cw = c.winfo_width()
+            ch = c.winfo_height()
+            if cw < 3 or ch < 3:
+                return
+
+            # ★ 彻底透明化 canvas + 绘制背景片段
+            cls._make_canvas_transparent(c)
+
+            # 计算控件在内容区中的坐标（用于内部 widget 同步）
+            wx = c.winfo_rootx() - cls._content_frame.winfo_rootx()
+            wy = c.winfo_rooty() - cls._content_frame.winfo_rooty()
+
+            # ★ CTkTextbox/CTkEntry 内部 widget 背景同步
+            cls._sync_inner_widget_bg(widget, wx, wy, cw, ch)
+
+        except Exception:
+            pass
+
+    @classmethod
+    def _handle_scrollable_frame(cls, widget):
+        """递归清除 CTkScrollableFrame 所有内部层的背景（不画片段，交子控件处理）。"""
+        try:
+            # 清除 _parent_canvas 上的不透明背景项
+            if hasattr(widget, '_parent_canvas'):
+                pc = widget._parent_canvas
+                if pc.winfo_exists() and pc.winfo_width() >= 3:
+                    for tag in ("inner_parts", "bg_parts", "background_parts", "background"):
+                        try:
+                            pc.itemconfig(tag, fill="", outline="")
+                        except Exception:
+                            pass
+
+            # 递归处理内部所有子控件
+            if hasattr(widget, 'winfo_children'):
+                for child in widget.winfo_children():
+                    if hasattr(child, '_canvas'):
+                        cls._on_widget_draw(child)
+                    else:
+                        cls._handle_scrollable_frame(child)
+        except Exception:
+            pass
+
+    @classmethod
+    def _make_canvas_transparent(cls, canvas):
+        """彻底透明化一个 canvas：清除所有背景项 + 绘制背景图片片段。"""
+        try:
+            if not canvas.winfo_exists():
+                return
+            pw = canvas.winfo_width()
+            ph = canvas.winfo_height()
+            if pw < 3 or ph < 3:
+                return
+
+            # 清除所有可能的背景标签
+            for tag in ("inner_parts", "bg_parts", "background_parts", "background", "bg"):
+                try:
+                    canvas.itemconfig(tag, fill="", outline="")
+                except Exception:
+                    pass
+            canvas.delete("background_parts")
+
+            # 计算坐标并绘制背景片段
+            wx = canvas.winfo_rootx() - cls._content_frame.winfo_rootx()
+            wy = canvas.winfo_rooty() - cls._content_frame.winfo_rooty()
+            pil_full = getattr(cls, '_bg_pil_blended', None)
+            if pil_full is None:
+                return
+            left = max(0, int(wx))
+            top = max(0, int(wy))
+            right = min(pil_full.width, int(wx + pw))
+            bottom = min(pil_full.height, int(wy + ph))
+            if right > left and bottom > top:
+                cropped = pil_full.crop((left, top, right, bottom))
+                tk_img = ImageTk.PhotoImage(cropped)
+                cls._refs.append(tk_img)
+                if len(cls._refs) > 500:
+                    cls._refs = cls._refs[-200:]
+                canvas.delete("bg_image")
+                dx = -int(wx) if wx < 0 else 0
+                dy = -int(wy) if wy < 0 else 0
+                canvas.create_image(dx, dy, anchor="nw", image=tk_img, tags="bg_image")
+                canvas.tag_lower("bg_image")
+        except Exception:
+            pass
+
+    @classmethod
+    def _sync_inner_widget_bg(cls, widget, wx, wy, cw, ch):
+        """同步 CTkTextbox._textbox / CTkEntry._entry 的背景色，去除边框感。"""
+        if isinstance(widget, ctk.CTkTextbox) and hasattr(widget, '_textbox'):
+            avg = cls._sample_color(wx, wy, cw, ch)
+            try:
+                widget._textbox.configure(
+                    bg=avg, highlightthickness=0, borderwidth=0,
+                    insertbackground="#C9D1D9")
+            except Exception:
+                pass
+        if isinstance(widget, ctk.CTkEntry) and hasattr(widget, '_entry'):
+            avg = cls._sample_color(wx, wy, cw, ch)
+            try:
+                widget._entry.configure(
+                    bg=avg, highlightthickness=0, borderwidth=0,
+                    insertbackground="#C9D1D9", relief="flat")
+            except Exception:
+                pass
+
+    @classmethod
+    def _sample_color(cls, wx, wy, cw, ch) -> str:
+        """从混合背景图采样颜色，返回适合文本区域背景的深色调。"""
+        pil_full = getattr(cls, '_bg_pil_blended', None)
+        if pil_full is None:
+            return "#0D1117"
+        try:
+            left = max(0, int(wx))
+            top = max(0, int(wy))
+            right = min(pil_full.width, int(wx + cw))
+            bottom = min(pil_full.height, int(wy + ch))
+            if right <= left or bottom <= top:
+                return "#0D1117"
+            region = pil_full.crop((left, top, right, bottom))
+            region = region.resize((1, 1), Image.LANCZOS)
+            pixel = region.getpixel((0, 0))
+            if len(pixel) >= 4:
+                r, g, b = pixel[0], pixel[1], pixel[2]
+            else:
+                r, g, b = pixel
+            # 直接匹配背景图颜色，让文字区域融入背景
+            r, g, b = int(r * 1.0), int(g * 1.0), int(b * 1.0)
+            return f'#{r:02x}{g:02x}{b:02x}'
+        except Exception:
+            return "#0D1117"
+
+    @classmethod
+    def _refresh_all_frames(cls):
+        if cls._content_frame:
+            cls._force_draw_descendants(cls._content_frame)
+
+    @classmethod
+    def _force_draw_descendants(cls, widget):
+        """递归触发所有后代控件的 _draw()，确保背景刷新。"""
+        try:
+            if hasattr(widget, '_draw'):
+                widget._draw()
+            # CTkScrollableFrame: 也刷新其内部 canvas
+            if hasattr(widget, '_parent_canvas'):
+                cls._handle_scrollable_frame(widget)
+            if hasattr(widget, '_canvas'):
+                cls._on_widget_draw(widget)
+        except Exception:
+            pass
+        if hasattr(widget, 'winfo_children'):
+            for child in widget.winfo_children():
+                cls._force_draw_descendants(child)
+
+    @classmethod
+    def exclude_widget(cls, widget):
+        """将某个控件及其所有后代排除出背景处理（如设置页）。"""
+        cls._excluded_widgets.add(widget)
+
+    @classmethod
+    def _is_descendant_of_content(cls, widget) -> bool:
+        try:
+            parent = widget.master
+            while parent:
+                if parent in cls._excluded_widgets:
+                    return False
+                if parent is cls._content_frame:
+                    return True
+                parent = parent.master
+        except Exception:
+            pass
+        return False
+
+    @classmethod
+    def _is_inside_scrollable(cls, widget) -> bool:
+        """判断控件是否在 CTkScrollableFrame 内部（避免每个子控件单独画背景导致滚动跳动）。"""
+        try:
+            parent = widget.master
+            while parent:
+                if parent is cls._content_frame:
+                    return False
+                if hasattr(parent, '_parent_canvas'):
+                    return True  # 找到了最近的一个 scrollable frame
+                parent = parent.master
+        except Exception:
+            pass
+        return False
+
+    @classmethod
+    def _clear_all(cls, widget):
+        if hasattr(widget, '_canvas'):
+            try:
+                widget._canvas.delete("bg_image")
+            except Exception:
+                pass
+        for child in widget.winfo_children():
+            cls._clear_all(child)
 
 
 class PiManagerApp(ctk.CTk):
@@ -33,7 +366,7 @@ class PiManagerApp(ctk.CTk):
         self.minsize(900, 600)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # 图标（如果有）
+        # 图标
         icon_path = Path(__file__).parent / "assets" / "icon.ico"
         if icon_path.exists():
             try:
@@ -44,7 +377,7 @@ class PiManagerApp(ctk.CTk):
         # 布局
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=0)  # 状态栏
+        self.grid_rowconfigure(1, weight=0)
 
         # ===== 左侧边栏 =====
         self._sidebar = ctk.CTkFrame(self, width=240)
@@ -59,11 +392,8 @@ class PiManagerApp(ctk.CTk):
         self._content.grid_rowconfigure(0, weight=1)
 
         # ===== 背景层 =====
-        self._bg_image = None
-        self._bg_refs = []  # 防 GC，存所有裁剪后的 PhotoImage
-
-        # 等窗口完全就绪后加载背景（足够时间让所有 widget 渲染）
-        self.after(1000, self._apply_background)
+        BackgroundManager.setup(self._content)
+        self.after(500, self._apply_background)
         self.bind("<Configure>", self._on_window_resize)
 
         # ===== 页面容器 =====
@@ -73,14 +403,15 @@ class PiManagerApp(ctk.CTk):
 
         # ===== 状态栏 =====
         self._status_bar = ctk.CTkFrame(self, height=28, corner_radius=0)
-        self._status_bar.grid(row=1, column=1, sticky="ew", padx=(0, 0))
-        self._status_bar.grid(row=1, column=1, sticky="ew", padx=(0, 0))
+        self._status_bar.grid(row=1, column=1, sticky="ew")
         self._status_bar.grid_columnconfigure(1, weight=1)
         self._status_label = ctk.CTkLabel(
-            self._status_bar, text="就绪", anchor="w", font=ctk.CTkFont(size=11))
+            self._status_bar, text="就绪", anchor="w",
+            font=ctk.CTkFont(size=11))
         self._status_label.grid(row=0, column=0, padx=10, sticky="w")
         self._status_right = ctk.CTkLabel(
-            self._status_bar, text="", anchor="e", font=ctk.CTkFont(size=11), text_color="gray")
+            self._status_bar, text="", anchor="e",
+            font=ctk.CTkFont(size=11), text_color="gray")
         self._status_right.grid(row=0, column=1, padx=10, sticky="e")
 
         # 显示首页
@@ -90,14 +421,15 @@ class PiManagerApp(ctk.CTk):
         if self._config.get("behavior", {}).get("auto_connect", False):
             self.after(500, self._auto_connect)
 
-    # ===== 侧边栏 =====
+    # ============================================================
+    #  侧边栏
+    # ============================================================
 
     def _build_sidebar(self):
         """构建侧边栏"""
         # Logo / 标题
         title_frame = ctk.CTkFrame(self._sidebar)
         title_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(20, 10))
-
         ctk.CTkLabel(title_frame, text="🥧", font=ctk.CTkFont(size=36)).pack(pady=(0, 5))
         ctk.CTkLabel(title_frame, text="PiManager",
                      font=ctk.CTkFont(size=18, weight="bold")).pack()
@@ -106,11 +438,9 @@ class PiManagerApp(ctk.CTk):
         status_frame = ctk.CTkFrame(
             self._sidebar, fg_color=("gray85", "gray17"), corner_radius=8)
         status_frame.grid(row=1, column=0, sticky="ew", padx=15, pady=(5, 10))
-
         self._conn_indicator = ctk.CTkLabel(
             status_frame, text="🔴 未连接", font=ctk.CTkFont(size=12))
         self._conn_indicator.pack(pady=(8, 2))
-
         self._conn_host = ctk.CTkLabel(
             status_frame, text="", font=ctk.CTkFont(size=11), text_color="gray")
         self._conn_host.pack(pady=(0, 8))
@@ -118,17 +448,14 @@ class PiManagerApp(ctk.CTk):
         # 连接按钮
         btn_frame = ctk.CTkFrame(self._sidebar)
         btn_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 10))
-
         self._btn_connect = ctk.CTkButton(
             btn_frame, text="🔌 连接", command=self._toggle_connection,
             height=32, fg_color="#2B5B2B", hover_color="#3A7A3A")
         self._btn_connect.pack(fill="x", pady=2)
-
         self._btn_settings_conn = ctk.CTkButton(
             btn_frame, text="⚙️ 连接设置", command=self._show_conn_settings,
             height=28, fg_color="transparent", border_width=1,
-            border_color=("gray40", "gray30"),
-            font=ctk.CTkFont(size=12))
+            border_color=("gray40", "gray30"), font=ctk.CTkFont(size=12))
         self._btn_settings_conn.pack(fill="x", pady=2)
 
         # 分隔线
@@ -156,8 +483,7 @@ class PiManagerApp(ctk.CTk):
         bottom_frame = ctk.CTkFrame(self._sidebar)
         bottom_frame.grid(row=10, column=0, sticky="ew", padx=15, pady=10)
         bottom_frame.grid_rowconfigure(10, weight=1)
-
-        ctk.CTkLabel(bottom_frame, text="v1.0.0", text_color="gray",
+        ctk.CTkLabel(bottom_frame, text="v1.1.0", text_color="gray",
                      font=ctk.CTkFont(size=10)).pack(side="bottom")
 
     def _highlight_nav(self, page_id: str):
@@ -168,7 +494,9 @@ class PiManagerApp(ctk.CTk):
             else:
                 btn.configure(fg_color="transparent")
 
-    # ===== 页面管理 =====
+    # ============================================================
+    #  页面管理
+    # ============================================================
 
     def _build_pages(self):
         """构建所有页面"""
@@ -177,16 +505,17 @@ class PiManagerApp(ctk.CTk):
         self._pages["status"] = self._status_panel
 
         # 文件管理页
-        self._file_browser = FileBrowser(self._content, self._ssh, self._config)
+        self._file_browser = FileBrowser(self._content, self._ssh, self._config, app_ref=self)
         self._pages["files"] = self._file_browser
 
-        # 终端页
-        self._terminal_page = self._build_terminal_page()
+        # 终端页（多标签多 Agent）
+        self._terminal_page = TerminalPage(self._content, self._ssh, self._config, app_ref=self)
         self._pages["terminal"] = self._terminal_page
 
-        # 设置页
-        self._settings_page = self._build_settings_page()
+        # 设置页（排除背景处理）
+        self._settings_page = SettingsPage(self._content, self._config, self._ssh, app_ref=self)
         self._pages["settings"] = self._settings_page
+        BackgroundManager.exclude_widget(self._settings_page)
 
     def _show_page(self, page_id: str):
         """切换页面"""
@@ -202,11 +531,13 @@ class PiManagerApp(ctk.CTk):
         # 显示目标页面
         page = self._pages[page_id]
         page.grid(row=0, column=0, sticky="nsew")
-        # 新页面需要重新绘制背景
-        if self._config["appearance"].get("background_path"):
-            self.after(100, self._apply_background)
 
-        # 页面切换时的额外操作
+        # 强制刷新背景（确保新显示的页面所有控件都被重绘）
+        self.update_idletasks()
+        if BackgroundManager._enabled:
+            self.after(50, lambda: BackgroundManager._force_draw_descendants(page))
+
+        # 页面切换时刷新
         if page_id == "status":
             if self._ssh.connected:
                 self._status_panel.refresh()
@@ -214,247 +545,12 @@ class PiManagerApp(ctk.CTk):
             if self._ssh.connected:
                 self._file_browser.refresh()
 
-    # ===== 终端页面 =====
-
-    def _build_terminal_page(self) -> ctk.CTkFrame:
-        """构建命令终端页面"""
-        frame = ctk.CTkFrame(self._content, fg_color="transparent", corner_radius=0)
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(0, weight=0)
-        frame.grid_rowconfigure(1, weight=1)
-        frame.grid_rowconfigure(2, weight=0)
-
-        # 快捷命令
-        quick_frame = ctk.CTkFrame(frame)
-        quick_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
-
-        quick_cmds = [
-            ("📊 状态", "top -bn1 | head -5"),
-            ("📁 文件", "ls -lah"),
-            ("💾 磁盘", "df -h"),
-            ("🧠 内存", "free -m"),
-            ("🌡️ 温度", "vcgencmd measure_temp"),
-            ("⏱ 运行", "uptime"),
-        ]
-        for text, cmd in quick_cmds:
-            btn = ctk.CTkButton(
-                quick_frame, text=text, width=70, height=26,
-                font=ctk.CTkFont(size=11), fg_color="#2B3B2B",
-                hover_color="#3A4A3A",
-                command=lambda c=cmd: self._run_terminal_cmd(c))
-            btn.pack(side="left", padx=2)
-
-        ctk.CTkButton(
-            quick_frame, text="🗑 清屏", width=60, height=26,
-            font=ctk.CTkFont(size=11), fg_color="transparent",
-            border_width=1, border_color=("gray40", "gray30"),
-            command=self._clear_terminal).pack(side="right", padx=2)
-
-        # 输出区
-        self._terminal_output = ctk.CTkTextbox(
-            frame, font=ctk.CTkFont(family="Consolas", size=12),
-            fg_color="#0D1117", text_color="#C9D1D9")
-        self._terminal_output.grid(row=1, column=0, sticky="nsew", padx=5, pady=2)
-
-        # 命令输入行
-        input_frame = ctk.CTkFrame(frame, fg_color="transparent", corner_radius=0)
-        input_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=(2, 5))
-        input_frame.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(input_frame, text="pi@zero:~$",
-                     font=ctk.CTkFont(family="Consolas", size=13),
-                     text_color="#4CAF50").grid(row=0, column=0, padx=(8, 4), pady=5)
-
-        self._terminal_input = ctk.CTkEntry(
-            input_frame, font=ctk.CTkFont(family="Consolas", size=13),
-            fg_color="#0D1117", text_color="#C9D1D9",
-            border_width=0, placeholder_text="输入命令...")
-        self._terminal_input.grid(row=0, column=1, sticky="ew", padx=(0, 4), pady=5)
-        self._terminal_input.bind("<Return>", lambda e: self._run_terminal_cmd())
-
-        send_btn = ctk.CTkButton(
-            input_frame, text="发送", width=60, height=28,
-            command=lambda: self._run_terminal_cmd())
-        send_btn.grid(row=0, column=2, padx=(0, 8), pady=5)
-
-        return frame
-
-    def _terminal_log(self, text: str, color: str = None):
-        """终端输出"""
-        self._terminal_output.insert("end", text)
-        self._terminal_output.see("end")
-
-    def _run_terminal_cmd(self, cmd: str = None):
-        """执行终端命令"""
-        if cmd is None:
-            cmd = self._terminal_input.get().strip()
-            self._terminal_input.delete(0, "end")
-
-        if not cmd:
-            return
-
-        if not self._ssh.connected:
-            self._terminal_log("\n❌ 未连接到树莓派\n")
-            return
-
-        self._terminal_log(f"\n💲 {cmd}\n")
-        self._status_label.configure(text=f"执行: {cmd[:50]}...")
-
-        def _exec():
-            code, out, err = self._ssh.exec_command(cmd, timeout=60)
-            self.after(0, lambda: self._on_terminal_result(out, err, cmd))
-
-        threading.Thread(target=_exec, daemon=True).start()
-
-    def _on_terminal_result(self, stdout: str, stderr: str, cmd: str):
-        """终端结果回调"""
-        if stdout:
-            self._terminal_log(stdout.rstrip() + "\n")
-        if stderr:
-            self._terminal_log(stderr.rstrip() + "\n", "#FF6B6B")
-        self._status_label.configure(text="就绪")
-
-    def _clear_terminal(self):
-        """清屏"""
-        self._terminal_output.delete("1.0", "end")
-
-    # ===== 设置页面 =====
-
-    def _build_settings_page(self) -> ctk.CTkFrame:
-        """构建设置页面"""
-        frame = ctk.CTkFrame(self._content, fg_color="transparent", corner_radius=0)
-
-        # 使用scrollable
-        scroll = ctk.CTkScrollableFrame(frame, fg_color="transparent", corner_radius=0)
-        scroll.pack(fill="both", expand=True, padx=5, pady=5)
-
-        # ===== 外观设置 =====
-        self._section_label(scroll, "🎨 外观设置", 0)
-
-        theme_frame = ctk.CTkFrame(scroll)
-        theme_frame.pack(fill="x", pady=5)
-        theme_frame.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(theme_frame, text="主题模式:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
-        theme_var = ctk.StringVar(value=self._config["appearance"]["theme"])
-        theme_menu = ctk.CTkOptionMenu(
-            theme_frame, values=["dark", "light"], variable=theme_var,
-            command=lambda v: self._on_theme_change(v))
-        theme_menu.grid(row=0, column=1, sticky="e", padx=10, pady=8)
-
-        ctk.CTkLabel(theme_frame, text="颜色主题:").grid(row=1, column=0, sticky="w", padx=10, pady=8)
-        color_var = ctk.StringVar(value=self._config["appearance"]["color_theme"])
-        color_menu = ctk.CTkOptionMenu(
-            theme_frame, values=["green", "blue", "dark-blue"], variable=color_var,
-            command=lambda v: ctk.set_default_color_theme(v))
-        color_menu.grid(row=1, column=1, sticky="e", padx=10, pady=8)
-
-        ctk.CTkLabel(theme_frame, text="字体缩放:").grid(row=2, column=0, sticky="w", padx=10, pady=8)
-        scale_var = ctk.DoubleVar(value=self._config["appearance"]["font_scale"])
-        scale_slider = ctk.CTkSlider(
-            theme_frame, from_=0.8, to=1.5, number_of_steps=7, variable=scale_var,
-            command=lambda v: ctk.set_widget_scaling(float(v)))
-        scale_slider.grid(row=2, column=1, sticky="ew", padx=10, pady=8)
-
-        # ===== 背景设置 =====
-        self._section_label(scroll, "🖼️ 背景设置", 0)
-
-        bg_frame = ctk.CTkFrame(scroll)
-        bg_frame.pack(fill="x", pady=5)
-
-        ctk.CTkLabel(bg_frame, text="背景图片:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
-        bg_path = self._config["appearance"].get("background_path", "")
-        bg_display = os.path.basename(bg_path) if bg_path else "未设置"
-        self._bg_path_label = ctk.CTkLabel(bg_frame, text=bg_display, text_color="gray")
-        self._bg_path_label.grid(row=0, column=1, sticky="e", padx=10, pady=8)
-
-        bg_btn_frame = ctk.CTkFrame(bg_frame, fg_color="transparent", corner_radius=0)
-        bg_btn_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 8))
-        ctk.CTkButton(
-            bg_btn_frame, text="选择图片", width=90, height=28,
-            command=self._choose_background).pack(side="left", padx=2)
-        ctk.CTkButton(
-            bg_btn_frame, text="清除背景", width=90, height=28,
-            fg_color="transparent", border_width=1, border_color=("gray40", "gray30"),
-            command=self._clear_background).pack(side="left", padx=2)
-
-        ctk.CTkLabel(bg_frame, text="背景透明度:").grid(row=2, column=0, sticky="w", padx=10, pady=8)
-        opacity_var = ctk.DoubleVar(value=self._config["appearance"]["background_opacity"])
-        opacity_slider = ctk.CTkSlider(
-            bg_frame, from_=0.05, to=0.5, number_of_steps=9, variable=opacity_var,
-            command=lambda v: self._on_opacity_change(float(v)))
-        opacity_slider.grid(row=2, column=1, sticky="ew", padx=10, pady=8)
-
-        # ===== 行为设置 =====
-        self._section_label(scroll, "⚡ 行为设置", 0)
-
-        behavior_frame = ctk.CTkFrame(scroll)
-        behavior_frame.pack(fill="x", pady=5)
-
-        auto_conn_var = ctk.BooleanVar(value=self._config["behavior"]["auto_connect"])
-        ctk.CTkCheckBox(
-            behavior_frame, text="启动时自动连接", variable=auto_conn_var).grid(
-            row=0, column=0, sticky="w", padx=10, pady=8)
-
-        ctk.CTkLabel(behavior_frame, text="刷新间隔(秒):").grid(row=1, column=0, sticky="w", padx=10, pady=8)
-        refresh_var = ctk.IntVar(value=self._config["behavior"]["refresh_interval"])
-        ctk.CTkSlider(
-            behavior_frame, from_=1, to=30, number_of_steps=29, variable=refresh_var,
-            command=lambda v: self._update_refresh_label(int(v), refresh_label)).grid(
-            row=1, column=1, sticky="ew", padx=10, pady=8)
-        refresh_label = ctk.CTkLabel(behavior_frame, text=f"{refresh_var.get()}秒")
-        refresh_label.grid(row=1, column=2, padx=10, pady=8)
-
-        confirm_var = ctk.BooleanVar(value=self._config["behavior"]["confirm_before_delete"])
-        ctk.CTkCheckBox(
-            behavior_frame, text="删除前确认", variable=confirm_var).grid(
-            row=2, column=0, sticky="w", padx=10, pady=8)
-
-        # 保存按钮
-        ctk.CTkButton(
-            scroll, text="💾 保存设置", height=36, fg_color="#2B5B2B",
-            hover_color="#3A7A3A",
-            command=lambda: self._save_settings(
-                theme_var.get(), color_var.get(), scale_var.get(),
-                opacity_var.get(), auto_conn_var.get(), refresh_var.get(),
-                confirm_var.get())).pack(pady=15)
-
-        return frame
-
-    def _section_label(self, parent, text: str, row: int):
-        """节标题"""
-        lbl = ctk.CTkLabel(parent, text=text, font=ctk.CTkFont(size=14, weight="bold"),
-                           anchor="w")
-        lbl.pack(fill="x", pady=(15, 5), padx=5)
-
-    def _on_theme_change(self, theme: str):
-        """切换主题"""
-        ctk.set_appearance_mode(theme)
-        self.after(200, self._apply_background)
-
-    def _on_opacity_change(self, val: float):
-        """调整背景透明度"""
-        self._config["appearance"]["background_opacity"] = float(val)
-        self._apply_background(force=True)
-
-    def _choose_background(self):
-        """选择背景图片"""
-        path = filedialog.askopenfilename(
-            title="选择背景图片",
-            filetypes=[("图片文件", "*.jpg *.jpeg *.png *.bmp *.gif"), ("所有文件", "*.*")])
-        if path:
-            self._config["appearance"]["background_path"] = path
-            self._bg_path_label.configure(text=os.path.basename(path))
-            self._apply_background(force=True)
-
-    def _clear_background(self):
-        """清除背景"""
-        self._config["appearance"]["background_path"] = ""
-        self._bg_path_label.configure(text="未设置")
-        self._clear_all_bg_images()
+    # ============================================================
+    #  背景管理
+    # ============================================================
 
     def _on_window_resize(self, event=None):
-        """窗口大小改变时更新背景（仅当尺寸真正变化）"""
+        """窗口大小改变时更新背景（防抖 400ms）"""
         if not hasattr(self, '_content'):
             return
         cw = self._content.winfo_width()
@@ -467,130 +563,22 @@ class PiManagerApp(ctk.CTk):
         self._bg_last_size = (cw, ch)
         if hasattr(self, '_resize_after_id') and self._resize_after_id:
             self.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.after(600, self._apply_background)
+        self._resize_after_id = self.after(400, lambda: BackgroundManager.refresh_size())
 
     def _apply_background(self, force=False):
-        """应用背景 - 加载图片，递归绘制到所有内容区域 Canvas 上"""
-        if hasattr(self, '_bg_applying') and self._bg_applying:
-            return  # 防止重叠调用
-        self._bg_applying = True
-        try:
-            self._do_apply_background()
-        finally:
-            self._bg_applying = False
-
-    def _do_apply_background(self):
-        self._clear_all_bg_images()
-
+        """应用背景图片"""
         bg_path = self._config["appearance"].get("background_path", "")
-        if not bg_path or not os.path.exists(bg_path):
-            return
+        opacity = self._config["appearance"].get("background_opacity", 0.15)
+        BackgroundManager.set_background(bg_path, float(opacity))
 
-        try:
-            opacity = self._config["appearance"].get("background_opacity", 0.25)
-            self.update_idletasks()
-            cw = self._content.winfo_width()
-            ch = self._content.winfo_height()
-            if cw < 50 or ch < 50:
-                cw, ch = 850, 660
-
-            img = Image.open(bg_path)
-            img = img.resize((cw, ch), Image.LANCZOS)
-            if img.mode != "RGBA":
-                img = img.convert("RGBA")
-
-            img.putalpha(Image.new("L", img.size, int(255 * opacity)))
-
-            self._bg_image = ImageTk.PhotoImage(img)
-            self._draw_bg_on_canvas(self._content)
-
-        except Exception:
-            pass
-
-    def _draw_bg_on_canvas(self, widget, count=None):
-        """递归在所有 CTkFrame canvas 上绘制裁剪后的背景图"""
-        if not self._bg_image:
-            return
-
-        if hasattr(widget, '_canvas'):
-            try:
-                c = widget._canvas
-                wx = c.winfo_rootx() - self._content.winfo_rootx()
-                wy = c.winfo_rooty() - self._content.winfo_rooty()
-                cw = c.winfo_width()
-                ch = c.winfo_height()
-
-                if cw > 2 and ch > 2:
-                    pil_img = ImageTk.getimage(self._bg_image)
-                    left = max(0, wx)
-                    top = max(0, wy)
-                    right = min(pil_img.width, wx + cw)
-                    bottom = min(pil_img.height, wy + ch)
-
-                    if right > left and bottom > top:
-                        cropped = pil_img.crop((int(left), int(top), int(right), int(bottom)))
-                        tk_img = ImageTk.PhotoImage(cropped)
-                        self._bg_refs.append(tk_img)
-
-                        dx = -wx if wx < 0 else 0
-                        dy = -wy if wy < 0 else 0
-                        c.create_image(dx, dy, anchor="nw", image=tk_img, tags="bg_image")
-                        c.tag_lower("bg_image")
-                        if count is not None:
-                            count[0] += 1
-            except Exception:
-                pass
-
-        for child in widget.winfo_children():
-            self._draw_bg_on_canvas(child, count)
-
-    def _clear_all_bg_images(self):
-        """清除所有 canvas 上的背景图"""
-        def _clear(widget):
-            if hasattr(widget, '_canvas'):
-                try:
-                    widget._canvas.delete("bg_image")
-                except Exception:
-                    pass
-            for child in widget.winfo_children():
-                _clear(child)
-        if hasattr(self, '_content'):
-            _clear(self._content)
-        self._bg_refs.clear()
-        self._bg_image = None
-
-    def _update_refresh_label(self, val: int, label):
-        """更新刷新间隔标签"""
-        label.configure(text=f"{val}秒")
-
-    def _save_settings(self, theme, color_theme, scale, opacity,
-                       auto_conn, refresh, confirm):
-        """保存设置"""
-        self._config["appearance"].update({
-            "theme": theme,
-            "color_theme": color_theme,
-            "font_scale": float(scale),
-            "background_opacity": float(opacity),
-        })
-        self._config["behavior"].update({
-            "auto_connect": bool(auto_conn),
-            "refresh_interval": int(refresh),
-            "confirm_before_delete": bool(confirm),
-        })
-
-        try:
-            save_config(self._config)
-            ctk.set_widget_scaling(float(scale))
-            messagebox.showinfo("保存成功", "设置已保存")
-        except Exception as e:
-            messagebox.showerror("保存失败", str(e))
-
-    # ===== 连接管理 =====
+    # ============================================================
+    #  连接管理
+    # ============================================================
 
     def _auto_connect(self):
         """自动连接"""
         conn = self._config.get("connections", [{}])[0]
-        if not conn:
+        if not conn or not conn.get("host"):
             return
         self._do_connect(
             conn.get("host", ""),
@@ -598,7 +586,7 @@ class PiManagerApp(ctk.CTk):
             conn.get("username", "pi"),
             conn.get("key_path", ""),
             conn.get("password", ""),
-            conn.get("use_key", True)
+            conn.get("use_key", True),
         )
 
     def _toggle_connection(self):
@@ -608,7 +596,7 @@ class PiManagerApp(ctk.CTk):
             self._on_disconnected()
         else:
             conn = self._config.get("connections", [{}])[0]
-            if not conn:
+            if not conn or not conn.get("host"):
                 self._show_conn_settings()
                 return
             self._do_connect(
@@ -617,7 +605,7 @@ class PiManagerApp(ctk.CTk):
                 conn.get("username", "pi"),
                 conn.get("key_path", ""),
                 conn.get("password", ""),
-                conn.get("use_key", True)
+                conn.get("use_key", True),
             )
 
     def _do_connect(self, host, port, username, key_path, password, use_key):
@@ -641,8 +629,6 @@ class PiManagerApp(ctk.CTk):
             self._btn_connect.configure(text="🔌 断开", state="normal",
                                         fg_color="#8B0000", hover_color="#A00000")
             self._status_label.configure(text="已连接")
-
-            # 刷新当前页面
             if self._current_page == "status":
                 self._status_panel.refresh()
                 self._status_panel.start_auto_refresh()
@@ -700,27 +686,21 @@ class PiManagerApp(ctk.CTk):
         # 密钥路径
         ctk.CTkLabel(content, text="密钥路径:", anchor="w").grid(
             row=4, column=0, sticky="w", pady=6, padx=(0, 10))
-
         key_frame = ctk.CTkFrame(content, fg_color="transparent")
         key_frame.grid(row=4, column=1, sticky="ew", pady=6)
         key_frame.grid_columnconfigure(0, weight=1)
-
         key_entry = ctk.CTkEntry(key_frame)
         key_entry.grid(row=0, column=0, sticky="ew")
         key_entry.insert(0, conn.get("key_path", ""))
         entries["key_path"] = key_entry
-
         ctk.CTkButton(
             key_frame, text="📂", width=36, height=28,
-            command=lambda: self._browse_key(key_entry)).grid(
-            row=0, column=1, padx=(4, 0))
+            command=lambda: self._browse_key(key_entry)).grid(row=0, column=1, padx=(4, 0))
 
-        # 连接提示
         ctk.CTkLabel(content, text="💡 提示：密钥认证优先，留空密码则使用密钥",
                      text_color="gray", font=ctk.CTkFont(size=11)).grid(
             row=5, column=0, columnspan=2, pady=10, sticky="w")
 
-        # 按钮
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")
         btn_frame.grid(row=6, column=0, columnspan=2, pady=10)
 
@@ -737,9 +717,15 @@ class PiManagerApp(ctk.CTk):
             dialog.destroy()
             messagebox.showinfo("保存成功", "连接设置已保存")
 
-        ctk.CTkButton(btn_frame, text="💾 保存并连接", command=lambda: (_save(), self._auto_connect())).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="保存", command=_save, fg_color="transparent",
-                      border_width=1, border_color=("gray40", "gray30")).pack(side="left", padx=5)
+        ctk.CTkButton(
+            btn_frame, text="💾 保存并连接",
+            command=lambda: (_save(), self._auto_connect())
+        ).pack(side="left", padx=5)
+        ctk.CTkButton(
+            btn_frame, text="保存", command=_save,
+            fg_color="transparent", border_width=1,
+            border_color=("gray40", "gray30")
+        ).pack(side="left", padx=5)
 
     def _browse_key(self, entry):
         """浏览密钥文件"""
@@ -751,7 +737,9 @@ class PiManagerApp(ctk.CTk):
             entry.delete(0, "end")
             entry.insert(0, path)
 
-    # ===== 关闭 =====
+    # ============================================================
+    #  关闭
+    # ============================================================
 
     def _on_close(self):
         """关闭应用"""
