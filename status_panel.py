@@ -33,9 +33,7 @@ class StatusPanel(ctk.CTkFrame):
         pad = {"padx": 10, "pady": 6}
 
         # ===== 系统信息卡片 =====
-        info_frame = ctk.CTkFrame(
-            self, fg_color="transparent", corner_radius=0,
-            border_width=1, border_color=("gray70", "gray35"))
+        info_frame = ctk.CTkFrame(self)
         info_frame.grid(row=0, column=0, columnspan=2, sticky="ew", **pad)
         info_frame.grid_columnconfigure(1, weight=1)
 
@@ -82,9 +80,7 @@ class StatusPanel(ctk.CTkFrame):
         self._disk_text.grid(row=0, column=1, sticky="e", padx=12, pady=(8, 0))
 
         # ===== 运行信息 =====
-        info2_frame = ctk.CTkFrame(
-            self, fg_color="transparent", corner_radius=0,
-            border_width=1, border_color=("gray70", "gray35"))
+        info2_frame = ctk.CTkFrame(self)
         info2_frame.grid(row=2, column=0, columnspan=2, sticky="ew", **pad)
         info2_frame.grid_columnconfigure(1, weight=1)
 
@@ -108,9 +104,7 @@ class StatusPanel(ctk.CTkFrame):
 
     def _make_card(self, title: str, row: int, col: int) -> ctk.CTkFrame:
         """创建一张状态卡片"""
-        frame = ctk.CTkFrame(
-            self, fg_color="transparent", corner_radius=0,
-            border_width=1, border_color=("gray70", "gray35"))
+        frame = ctk.CTkFrame(self)
         frame.grid(row=row + 1, column=col, sticky="nsew", padx=5, pady=3)
         frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(frame, text=title, font=ctk.CTkFont(size=13, weight="bold"),

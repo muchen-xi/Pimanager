@@ -47,9 +47,8 @@ class PiManagerApp(ctk.CTk):
         self.grid_rowconfigure(1, weight=0)  # 状态栏
 
         # ===== 左侧边栏 =====
-        self._sidebar = ctk.CTkFrame(self, width=240, fg_color="transparent", corner_radius=0)
+        self._sidebar = ctk.CTkFrame(self, width=240)
         self._sidebar.grid(row=0, column=0, sticky="ns", rowspan=2)
-        self._sidebar.grid_propagate(False)
         self._sidebar.grid_columnconfigure(0, weight=1)
         self._build_sidebar()
 
@@ -73,7 +72,8 @@ class PiManagerApp(ctk.CTk):
         self._build_pages()
 
         # ===== 状态栏 =====
-        self._status_bar = ctk.CTkFrame(self, height=28, fg_color="transparent", corner_radius=0)
+        self._status_bar = ctk.CTkFrame(self, height=28, corner_radius=0)
+        self._status_bar.grid(row=1, column=1, sticky="ew", padx=(0, 0))
         self._status_bar.grid(row=1, column=1, sticky="ew", padx=(0, 0))
         self._status_bar.grid_columnconfigure(1, weight=1)
         self._status_label = ctk.CTkLabel(
@@ -95,7 +95,7 @@ class PiManagerApp(ctk.CTk):
     def _build_sidebar(self):
         """构建侧边栏"""
         # Logo / 标题
-        title_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent", corner_radius=0)
+        title_frame = ctk.CTkFrame(self._sidebar)
         title_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(20, 10))
 
         ctk.CTkLabel(title_frame, text="🥧", font=ctk.CTkFont(size=36)).pack(pady=(0, 5))
@@ -104,8 +104,7 @@ class PiManagerApp(ctk.CTk):
 
         # 连接状态
         status_frame = ctk.CTkFrame(
-            self._sidebar, fg_color="transparent", corner_radius=0,
-            border_width=1, border_color=("gray70", "gray35"))
+            self._sidebar, fg_color=("gray85", "gray17"), corner_radius=8)
         status_frame.grid(row=1, column=0, sticky="ew", padx=15, pady=(5, 10))
 
         self._conn_indicator = ctk.CTkLabel(
@@ -117,7 +116,7 @@ class PiManagerApp(ctk.CTk):
         self._conn_host.pack(pady=(0, 8))
 
         # 连接按钮
-        btn_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent", corner_radius=0)
+        btn_frame = ctk.CTkFrame(self._sidebar)
         btn_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 10))
 
         self._btn_connect = ctk.CTkButton(
@@ -154,7 +153,7 @@ class PiManagerApp(ctk.CTk):
             self._nav_buttons[page_id] = btn
 
         # 底部信息
-        bottom_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent", corner_radius=0)
+        bottom_frame = ctk.CTkFrame(self._sidebar)
         bottom_frame.grid(row=10, column=0, sticky="ew", padx=15, pady=10)
         bottom_frame.grid_rowconfigure(10, weight=1)
 
@@ -226,7 +225,7 @@ class PiManagerApp(ctk.CTk):
         frame.grid_rowconfigure(2, weight=0)
 
         # 快捷命令
-        quick_frame = ctk.CTkFrame(frame, fg_color="transparent", corner_radius=0)
+        quick_frame = ctk.CTkFrame(frame)
         quick_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
 
         quick_cmds = [
@@ -332,7 +331,7 @@ class PiManagerApp(ctk.CTk):
         # ===== 外观设置 =====
         self._section_label(scroll, "🎨 外观设置", 0)
 
-        theme_frame = ctk.CTkFrame(scroll, fg_color="transparent", corner_radius=0)
+        theme_frame = ctk.CTkFrame(scroll)
         theme_frame.pack(fill="x", pady=5)
         theme_frame.grid_columnconfigure(1, weight=1)
 
@@ -360,7 +359,7 @@ class PiManagerApp(ctk.CTk):
         # ===== 背景设置 =====
         self._section_label(scroll, "🖼️ 背景设置", 0)
 
-        bg_frame = ctk.CTkFrame(scroll, fg_color="transparent", corner_radius=0)
+        bg_frame = ctk.CTkFrame(scroll)
         bg_frame.pack(fill="x", pady=5)
 
         ctk.CTkLabel(bg_frame, text="背景图片:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
@@ -389,7 +388,7 @@ class PiManagerApp(ctk.CTk):
         # ===== 行为设置 =====
         self._section_label(scroll, "⚡ 行为设置", 0)
 
-        behavior_frame = ctk.CTkFrame(scroll, fg_color="transparent", corner_radius=0)
+        behavior_frame = ctk.CTkFrame(scroll)
         behavior_frame.pack(fill="x", pady=5)
 
         auto_conn_var = ctk.BooleanVar(value=self._config["behavior"]["auto_connect"])
