@@ -5,9 +5,10 @@ import customtkinter as ctk
 import threading
 import datetime
 import os
+import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from PIL import Image
+from PIL import Image, ImageTk
 
 from .config import load_config, save_config
 from .ssh_client import SSHClient
@@ -24,6 +25,7 @@ class PiManagerApp(ctk.CTk):
         # 初始化
         self._config = load_config()
         self._ssh = SSHClient()
+        self._resize_after_id = None
 
         # 窗口设置
         self.title("PiManager - 树莓派管理器")
@@ -58,8 +60,9 @@ class PiManagerApp(ctk.CTk):
         self._content.grid_rowconfigure(0, weight=1)
 
         # ===== 背景层 =====
-        self._bg_label = None
+        self._bg_image = None
         self._apply_background()
+        self.bind("<Configure>", self._on_window_resize)
 
         # ===== 页面容器 =====
         self._pages = {}
@@ -196,6 +199,9 @@ class PiManagerApp(ctk.CTk):
         # 显示目标页面
         page = self._pages[page_id]
         page.grid(row=0, column=0, sticky="nsew")
+        # 新页面需要重新绘制背景
+        if self._config["appearance"].get("background_path"):
+            self.after(100, self._apply_background)
 
         # 页面切换时的额外操作
         if page_id == "status":
@@ -421,6 +427,7 @@ class PiManagerApp(ctk.CTk):
     def _on_theme_change(self, theme: str):
         """切换主题"""
         ctk.set_appearance_mode(theme)
+        self.after(200, self._apply_background)
 
     def _on_opacity_change(self, val: float):
         """调整背景透明度"""
@@ -441,42 +448,83 @@ class PiManagerApp(ctk.CTk):
         """清除背景"""
         self._config["appearance"]["background_path"] = ""
         self._bg_path_label.configure(text="未设置")
-        self._apply_background()
+        self._clear_all_bg_images()
+
+    def _on_window_resize(self, event=None):
+        """窗口大小改变时更新背景"""
+        if hasattr(self, '_resize_after_id') and self._resize_after_id:
+            self.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.after(300, self._apply_background)
 
     def _apply_background(self):
-        """应用背景图片"""
-        # 清除旧背景
-        if self._bg_label:
-            self._bg_label.destroy()
-            self._bg_label = None
+        """应用背景图片 - 递归绘制到所有内容区 Canvas 上"""
+        # 清除所有旧背景
+        self._clear_all_bg_images()
 
         bg_path = self._config["appearance"].get("background_path", "")
         if not bg_path or not os.path.exists(bg_path):
             return
 
         try:
-            from PIL import Image, ImageTk
-
             opacity = self._config["appearance"].get("background_opacity", 0.15)
             img = Image.open(bg_path)
 
-            # 调整为窗口大小
-            win_w = self.winfo_width() or 1100
-            win_h = self.winfo_height() or 700
-            img = img.resize((win_w, win_h), Image.LANCZOS)
+            # 获取内容区实际大小
+            self.update_idletasks()
+            content_w = self._content.winfo_width()
+            content_h = self._content.winfo_height()
+            if content_w < 50 or content_h < 50:
+                content_w, content_h = 850, 660
+
+            img = img.resize((content_w, content_h), Image.LANCZOS)
 
             # 应用透明度
             if img.mode != "RGBA":
                 img = img.convert("RGBA")
             alpha = int(255 * opacity)
-            img.putalpha(alpha)
+            pixels = img.load()
+            for y in range(img.height):
+                for x in range(img.width):
+                    r, g, b, _ = pixels[x, y]
+                    pixels[x, y] = (r, g, b, alpha)
 
             self._bg_image = ImageTk.PhotoImage(img)
-            self._bg_label = ctk.CTkLabel(self, image=self._bg_image, text="")
-            self._bg_label.place(x=0, y=0, relwidth=1, relheight=1)
-            self._bg_label.lower()  # 放到最底层
+
+            # 递归在所有 CTkFrame canvas 上绘制背景
+            self._draw_bg_on_canvas(self._content, 0, 0)
+
         except Exception as e:
             print(f"背景加载失败: {e}")
+
+    def _draw_bg_on_canvas(self, widget, offset_x=0, offset_y=0):
+        """递归在 CTkFrame 内部 Canvas 上绘制背景图"""
+        if hasattr(widget, '_canvas') and self._bg_image:
+            try:
+                # 计算该 widget 在 _content 内的偏移
+                wx = widget.winfo_rootx() - self._content.winfo_rootx()
+                wy = widget.winfo_rooty() - self._content.winfo_rooty()
+                img_id = widget._canvas.create_image(
+                    -wx, -wy, anchor="nw", image=self._bg_image, tags="bg_image"
+                )
+                widget._canvas.tag_lower("bg_image")
+            except Exception:
+                pass
+        for child in widget.winfo_children():
+            self._draw_bg_on_canvas(child)
+
+    def _clear_all_bg_images(self):
+        """清除所有 canvas 上的背景图"""
+        def _clear(widget):
+            if hasattr(widget, '_canvas'):
+                try:
+                    widget._canvas.delete("bg_image")
+                except Exception:
+                    pass
+            for child in widget.winfo_children():
+                _clear(child)
+        if hasattr(self, '_content'):
+            _clear(self._content)
+        self._bg_image = None
 
     def _update_refresh_label(self, val: int, label):
         """更新刷新间隔标签"""
