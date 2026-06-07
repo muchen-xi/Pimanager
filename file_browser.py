@@ -12,7 +12,7 @@ class FileBrowser(ctk.CTkFrame):
     """远程文件管理器"""
 
     def __init__(self, master, ssh_client, config: dict = None):
-        super().__init__(master, fg_color="transparent")
+        super().__init__(master, fg_color="transparent", corner_radius=0)
         self._ssh = ssh_client
         self._config = config or {}
         self._current_path = "/home/chenxi"
@@ -45,7 +45,7 @@ class FileBrowser(ctk.CTkFrame):
             fg_color="transparent", hover_color="#333")
         self._btn_up.grid(row=0, column=1, padx=2, pady=5)
 
-        self._path_frame = ctk.CTkFrame(nav_frame, fg_color="transparent")
+        self._path_frame = ctk.CTkFrame(nav_frame, fg_color="transparent", corner_radius=0)
         self._path_frame.grid(row=0, column=2, sticky="ew", padx=5)
 
         self._btn_refresh = ctk.CTkButton(
@@ -71,7 +71,7 @@ class FileBrowser(ctk.CTkFrame):
             row=0, column=2, sticky="e", padx=8, pady=2)
 
         # ===== 文件列表滚动区 =====
-        self._file_scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._file_scroll = ctk.CTkScrollableFrame(self, fg_color="transparent", corner_radius=0)
         self._file_scroll.grid(row=2, column=0, sticky="nsew", padx=5, pady=(0, 5))
         self._file_scroll.grid_columnconfigure(0, weight=1)
 

@@ -10,7 +10,7 @@ class StatusPanel(ctk.CTkFrame):
     """系统状态监控面板"""
 
     def __init__(self, master, ssh_client, config: dict = None):
-        super().__init__(master, fg_color="transparent")
+        super().__init__(master, fg_color="transparent", corner_radius=0)
         self._ssh = ssh_client
         self._config = config or {}
         self._refresh_job = None
@@ -91,7 +91,7 @@ class StatusPanel(ctk.CTkFrame):
         self._lbl_load.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 8))
 
         # ===== 刷新按钮 =====
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
         btn_frame.grid(row=3, column=0, columnspan=2, sticky="e", **pad)
 
         self._btn_refresh = ctk.CTkButton(

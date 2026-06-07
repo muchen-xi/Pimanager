@@ -54,13 +54,14 @@ class PiManagerApp(ctk.CTk):
         self._build_sidebar()
 
         # ===== 主内容区 =====
-        self._content = ctk.CTkFrame(self, fg_color="transparent")
+        self._content = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
         self._content.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         self._content.grid_columnconfigure(0, weight=1)
         self._content.grid_rowconfigure(0, weight=1)
 
         # ===== 背景层 =====
         self._bg_image = None
+        self._bg_refs = []  # 防 GC
         self._apply_background()
         self.bind("<Configure>", self._on_window_resize)
 
@@ -215,7 +216,7 @@ class PiManagerApp(ctk.CTk):
 
     def _build_terminal_page(self) -> ctk.CTkFrame:
         """构建命令终端页面"""
-        frame = ctk.CTkFrame(self._content, fg_color="transparent")
+        frame = ctk.CTkFrame(self._content, fg_color="transparent", corner_radius=0)
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(0, weight=0)
         frame.grid_rowconfigure(1, weight=1)
@@ -319,7 +320,7 @@ class PiManagerApp(ctk.CTk):
 
     def _build_settings_page(self) -> ctk.CTkFrame:
         """构建设置页面"""
-        frame = ctk.CTkFrame(self._content, fg_color="transparent")
+        frame = ctk.CTkFrame(self._content, fg_color="transparent", corner_radius=0)
 
         # 使用scrollable
         scroll = ctk.CTkScrollableFrame(frame, fg_color="transparent")
@@ -457,8 +458,7 @@ class PiManagerApp(ctk.CTk):
         self._resize_after_id = self.after(300, self._apply_background)
 
     def _apply_background(self):
-        """应用背景图片 - 递归绘制到所有内容区 Canvas 上"""
-        # 清除所有旧背景
+        """应用背景 - 加载图片，递归绘制到所有内容区域 Canvas"""
         self._clear_all_bg_images()
 
         bg_path = self._config["appearance"].get("background_path", "")
@@ -467,18 +467,15 @@ class PiManagerApp(ctk.CTk):
 
         try:
             opacity = self._config["appearance"].get("background_opacity", 0.15)
-            img = Image.open(bg_path)
-
-            # 获取内容区实际大小
             self.update_idletasks()
-            content_w = self._content.winfo_width()
-            content_h = self._content.winfo_height()
-            if content_w < 50 or content_h < 50:
-                content_w, content_h = 850, 660
+            cw = self._content.winfo_width()
+            ch = self._content.winfo_height()
+            if cw < 50 or ch < 50:
+                cw, ch = 850, 660
 
-            img = img.resize((content_w, content_h), Image.LANCZOS)
+            img = Image.open(bg_path)
+            img = img.resize((cw, ch), Image.LANCZOS)
 
-            # 应用透明度
             if img.mode != "RGBA":
                 img = img.convert("RGBA")
             alpha = int(255 * opacity)
@@ -490,25 +487,43 @@ class PiManagerApp(ctk.CTk):
 
             self._bg_image = ImageTk.PhotoImage(img)
 
-            # 递归在所有 CTkFrame canvas 上绘制背景
-            self._draw_bg_on_canvas(self._content, 0, 0)
+            self._draw_bg_on_canvas(self._content)
 
         except Exception as e:
             print(f"背景加载失败: {e}")
 
-    def _draw_bg_on_canvas(self, widget, offset_x=0, offset_y=0):
-        """递归在 CTkFrame 内部 Canvas 上绘制背景图"""
-        if hasattr(widget, '_canvas') and self._bg_image:
+    def _draw_bg_on_canvas(self, widget):
+        """递归在 CTkFrame canvas 上绘制背景(裁剪+偏移，防 widget 覆盖)"""
+        if not self._bg_image:
+            return
+
+        if hasattr(widget, '_canvas'):
             try:
-                # 计算该 widget 在 _content 内的偏移
-                wx = widget.winfo_rootx() - self._content.winfo_rootx()
-                wy = widget.winfo_rooty() - self._content.winfo_rooty()
-                img_id = widget._canvas.create_image(
-                    -wx, -wy, anchor="nw", image=self._bg_image, tags="bg_image"
-                )
-                widget._canvas.tag_lower("bg_image")
+                c = widget._canvas
+                wx = c.winfo_rootx() - self._content.winfo_rootx()
+                wy = c.winfo_rooty() - self._content.winfo_rooty()
+                cw = c.winfo_width()
+                ch = c.winfo_height()
+
+                if cw > 2 and ch > 2:
+                    pil_img = ImageTk.getimage(self._bg_image)
+                    left = max(0, wx)
+                    top = max(0, wy)
+                    right = min(pil_img.width, wx + cw)
+                    bottom = min(pil_img.height, wy + ch)
+
+                    if right > left and bottom > top:
+                        cropped = pil_img.crop((int(left), int(top), int(right), int(bottom)))
+                        tk_img = ImageTk.PhotoImage(cropped)
+                        self._bg_refs.append(tk_img)  # 防 GC
+
+                        dx = -wx if wx < 0 else 0
+                        dy = -wy if wy < 0 else 0
+                        c.create_image(dx, dy, anchor="nw", image=tk_img, tags="bg_image")
+                        c.tag_lower("bg_image")
             except Exception:
                 pass
+
         for child in widget.winfo_children():
             self._draw_bg_on_canvas(child)
 
@@ -524,6 +539,7 @@ class PiManagerApp(ctk.CTk):
                 _clear(child)
         if hasattr(self, '_content'):
             _clear(self._content)
+        self._bg_refs.clear()
         self._bg_image = None
 
     def _update_refresh_label(self, val: int, label):
