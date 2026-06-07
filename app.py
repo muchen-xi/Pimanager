@@ -44,6 +44,7 @@ class BackgroundManager:
     _enabled: bool = False
     _original_draws: dict = {}
     _excluded_widgets: set = set()
+    _processed_canvases: dict = {}  # canvas id → (width, height) 缓存，跳过已处理的尺寸
 
     # ========== 公开 API ==========
 
@@ -81,6 +82,7 @@ class BackgroundManager:
             try:
                 cls._bg_pil = Image.open(path)
                 cls._enabled = True
+                cls._processed_canvases.clear()
                 cls._prepare_full_image()
                 cls._refresh_all()
             except Exception:
@@ -107,6 +109,7 @@ class BackgroundManager:
     def refresh_size(cls):
         """窗口大小改变后重新缩放并重绘背景。"""
         if cls._enabled and cls._bg_pil:
+            cls._processed_canvases.clear()
             cls._prepare_full_image()
             cls._refresh_all()
 
@@ -128,10 +131,10 @@ class BackgroundManager:
     # ========== 核心：Canvas 透明化 + 背景片段绘制 ==========
 
     @classmethod
-    def make_canvas_transparent(cls, canvas):
+    def make_canvas_transparent(cls, canvas, force: bool = False):
         """对一个 tk.Canvas 进行透明化 + 绘制背景片段。
 
-        供外部 Canvas 组件（CanvasTerminalOutput, CanvasFileList）直接调用。
+        force=True 时跳过尺寸缓存，强制重绘（用于 resize 等场景）。
         """
         if not cls._enabled or not cls._content_frame:
             return
@@ -141,6 +144,13 @@ class BackgroundManager:
             pw, ph = canvas.winfo_width(), canvas.winfo_height()
             if pw < 3 or ph < 3:
                 return
+
+            # ★ 尺寸缓存：同尺寸跳过，减少重复绘制
+            cid = id(canvas)
+            cached = cls._processed_canvases.get(cid)
+            if not force and cached == (pw, ph):
+                return
+            cls._processed_canvases[cid] = (pw, ph)
 
             # 清除所有可能的不透明背景标签
             for tag in ("inner_parts", "bg_parts", "background_parts", "background", "bg"):
@@ -591,7 +601,7 @@ class PiManagerApp(ctk.CTk):
         self._bg_last_size = (cw, ch)
         if hasattr(self, '_resize_after_id') and self._resize_after_id:
             self.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.after(400, lambda: BackgroundManager.refresh_size())
+        self._resize_after_id = self.after(150, lambda: BackgroundManager.refresh_size())
 
     def _apply_background(self, force=False):
         """应用背景图片"""
@@ -694,37 +704,16 @@ class PiManagerApp(ctk.CTk):
     # ============================================================
 
     def _refresh_sidebar_stats(self):
-        """刷新侧边栏 CPU/RAM/IP/温度"""
+        """刷新侧边栏 CPU/RAM/IP/温度（1 次 SSH 往返）"""
         if not self._ssh.connected:
             return
 
         def _fetch():
             try:
-                # CPU
-                _, cpu_out, _ = self._ssh.exec_command(
-                    "top -bn1 | grep 'CPU' | head -1 | awk '{print $2+$4}'")
-                cpu_val = float(cpu_out.strip()) if cpu_out.strip() else 0
-
-                # 内存
-                _, mem_out, _ = self._ssh.exec_command(
-                    "free -m | grep Mem | awk '{print $2,$3}'")
-                mem_parts = mem_out.strip().split()
-                mem_total = int(mem_parts[0]) if len(mem_parts) >= 1 else 0
-                mem_used = int(mem_parts[1]) if len(mem_parts) >= 2 else 0
-                mem_pct = (mem_used / mem_total * 100) if mem_total > 0 else 0
-
-                # IP
-                _, ip_out, _ = self._ssh.exec_command(
-                    "hostname -I 2>/dev/null | awk '{print $1}'")
-                ip_addr = ip_out.strip() if ip_out.strip() else "--"
-
-                # 温度
-                _, temp_out, _ = self._ssh.exec_command(
-                    "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0")
-                temp_val = float(temp_out.strip()) / 1000.0 if temp_out.strip() else 0
-
+                s = self._ssh.get_sidebar_stats()
                 self.after(0, lambda: self._update_sidebar_ui(
-                    cpu_val, mem_pct, mem_used, mem_total, ip_addr, temp_val))
+                    s["cpu"], s["mem_pct"], s["mem_used"],
+                    s["mem_total"], s["ip"], s["temp"]))
             except Exception:
                 pass
 
@@ -765,7 +754,7 @@ class PiManagerApp(ctk.CTk):
         """执行自动刷新"""
         if self._ssh.connected:
             self._refresh_sidebar_stats()
-        self._sidebar_refresh_job = self.after(5000, self._do_sidebar_refresh)
+        self._sidebar_refresh_job = self.after(3000, self._do_sidebar_refresh)
 
     def _stop_sidebar_refresh(self):
         """停止侧边栏自动刷新"""
