@@ -237,86 +237,106 @@ class SSHClient:
     # ========== 系统状态 ==========
 
     def get_system_status(self) -> dict:
-        """获取树莓派系统状态"""
+        """获取树莓派系统状态（合并为 1 次 SSH 往返，大幅优化响应时间）。"""
         status = {
             "hostname": self._host,
-            "cpu_percent": 0.0,
-            "cpu_temp": 0.0,
-            "memory_total": 0,
-            "memory_used": 0,
-            "memory_percent": 0.0,
-            "disk_total": 0,
-            "disk_used": 0,
-            "disk_percent": 0.0,
-            "uptime": "",
-            "load_avg": "",
-            "os_version": "",
-            "kernel": "",
+            "cpu_percent": 0.0, "cpu_temp": 0.0,
+            "memory_total": 0, "memory_used": 0, "memory_percent": 0.0,
+            "disk_total": 0, "disk_used": 0, "disk_percent": 0.0,
+            "uptime": "", "load_avg": "", "os_version": "", "kernel": "",
             "error": "",
         }
 
-        # CPU温度
-        code, out, err = self.exec_command(
-            "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0"
+        # ★ 一次 SSH 调用获取所有数据，每行一个字段
+        script = (
+            "echo CPU_TEMP:$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0);"
+            "echo CPU_PCT:$(top -bn1 | grep 'CPU' | head -1 | awk '{print $2+$4}');"
+            "echo MEM:$(free -m | grep Mem | awk '{print $2,$3}');"
+            "echo DISK:$(df -BM / | tail -1 | awk '{print $2,$3,$5}' | tr -d '%');"
+            "echo UPTIME:$(uptime -p 2>/dev/null || uptime);"
+            "echo LOAD:$(uptime | awk -F'load average:' '{print $2}' | xargs);"
+            "echo OS:$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '\"');"
+            "echo KERNEL:$(uname -r)"
         )
-        if code == 0 and out.strip():
+        code, out, err = self.exec_command(script, timeout=15)
+
+        if code != 0 or not out.strip():
+            return status
+
+        for line in out.strip().split("\n"):
+            line = line.strip()
+            if ":" not in line:
+                continue
+            key, _, val = line.partition(":")
+            val = val.strip()
             try:
-                status["cpu_temp"] = float(out.strip()) / 1000.0
-            except ValueError:
+                if key == "CPU_TEMP":
+                    status["cpu_temp"] = float(val) / 1000.0
+                elif key == "CPU_PCT":
+                    status["cpu_percent"] = float(val)
+                elif key == "MEM":
+                    parts = val.split()
+                    if len(parts) >= 2:
+                        status["memory_total"] = int(parts[0])
+                        status["memory_used"] = int(parts[1])
+                        status["memory_percent"] = (int(parts[1]) / int(parts[0]) * 100) if int(parts[0]) > 0 else 0
+                elif key == "DISK":
+                    parts = val.split()
+                    if len(parts) >= 3:
+                        status["disk_total"] = int(parts[0].replace("M", ""))
+                        status["disk_used"] = int(parts[1].replace("M", ""))
+                        status["disk_percent"] = float(parts[2])
+                elif key == "UPTIME":
+                    status["uptime"] = val
+                elif key == "LOAD":
+                    status["load_avg"] = val
+                elif key == "OS":
+                    status["os_version"] = val
+                elif key == "KERNEL":
+                    status["kernel"] = val
+            except (ValueError, IndexError):
                 pass
-
-        # CPU使用率
-        code, out, err = self.exec_command(
-            "top -bn1 | grep 'CPU' | head -1 | awk '{print $2+$4}'"
-        )
-        if code == 0 and out.strip():
-            try:
-                status["cpu_percent"] = float(out.strip())
-            except ValueError:
-                pass
-
-        # 内存
-        code, out, err = self.exec_command("free -m | grep Mem | awk '{print $2,$3,$4}'")
-        if code == 0 and out.strip():
-            parts = out.strip().split()
-            if len(parts) >= 2:
-                status["memory_total"] = int(parts[0])
-                status["memory_used"] = int(parts[1])
-                status["memory_percent"] = (int(parts[1]) / int(parts[0]) * 100) if int(parts[0]) > 0 else 0
-
-        # 磁盘
-        code, out, err = self.exec_command("df -BM / | tail -1 | awk '{print $2,$3,$5}'")
-        if code == 0 and out.strip():
-            parts = out.strip().split()
-            if len(parts) >= 2:
-                try:
-                    status["disk_total"] = int(parts[0].replace("M", ""))
-                    status["disk_used"] = int(parts[1].replace("M", ""))
-                    status["disk_percent"] = float(parts[2].replace("%", ""))
-                except (ValueError, IndexError):
-                    pass
-
-        # 运行时间
-        code, out, err = self.exec_command("uptime -p 2>/dev/null || uptime")
-        if code == 0:
-            status["uptime"] = out.strip()
-
-        # 负载
-        code, out, err = self.exec_command("uptime | awk -F'load average:' '{print $2}'")
-        if code == 0:
-            status["load_avg"] = out.strip()
-
-        # 系统版本
-        code, out, err = self.exec_command("cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '\"'")
-        if code == 0 and out.strip():
-            status["os_version"] = out.strip()
-
-        # 内核
-        code, out, err = self.exec_command("uname -r")
-        if code == 0:
-            status["kernel"] = out.strip()
 
         return status
+
+    def get_sidebar_stats(self) -> dict:
+        """获取侧边栏精简状态（1 次 SSH 往返）。"""
+        script = (
+            "echo CPU_PCT:$(top -bn1 | grep 'CPU' | head -1 | awk '{print $2+$4}');"
+            "echo MEM:$(free -m | grep Mem | awk '{print $2,$3}');"
+            "echo IP:$(hostname -I 2>/dev/null | awk '{print $1}');"
+            "echo TEMP:$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0)"
+        )
+        code, out, err = self.exec_command(script, timeout=10)
+        result = {"cpu": 0.0, "mem_total": 0, "mem_used": 0, "mem_pct": 0.0,
+                   "ip": "--", "temp": 0.0}
+
+        if code != 0 or not out.strip():
+            return result
+
+        for line in out.strip().split("\n"):
+            line = line.strip()
+            if ":" not in line:
+                continue
+            key, _, val = line.partition(":")
+            val = val.strip()
+            try:
+                if key == "CPU_PCT":
+                    result["cpu"] = float(val)
+                elif key == "MEM":
+                    parts = val.split()
+                    if len(parts) >= 2:
+                        result["mem_total"] = int(parts[0])
+                        result["mem_used"] = int(parts[1])
+                        result["mem_pct"] = (int(parts[1]) / int(parts[0]) * 100) if int(parts[0]) > 0 else 0
+                elif key == "IP":
+                    result["ip"] = val if val else "--"
+                elif key == "TEMP":
+                    result["temp"] = float(val) / 1000.0
+            except (ValueError, IndexError):
+                pass
+
+        return result
 
     def test_connection(self) -> bool:
         """测试连接是否存活"""
