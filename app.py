@@ -62,10 +62,9 @@ class PiManagerApp(ctk.CTk):
         # ===== 背景层 =====
         self._bg_image = None
         self._bg_refs = []  # 防 GC，存所有裁剪后的 PhotoImage
-        self._bg_loaded = False
 
-        # 等窗口完全就绪后一次性加载背景
-        self.after_idle(self._apply_background)
+        # 等窗口完全就绪后加载背景（足够时间让所有 widget 渲染）
+        self.after(1000, self._apply_background)
         self.bind("<Configure>", self._on_window_resize)
 
         # ===== 页面容器 =====
@@ -74,7 +73,7 @@ class PiManagerApp(ctk.CTk):
         self._build_pages()
 
         # ===== 状态栏 =====
-        self._status_bar = ctk.CTkFrame(self, height=28, corner_radius=0)
+        self._status_bar = ctk.CTkFrame(self, height=28, fg_color="transparent", corner_radius=0)
         self._status_bar.grid(row=1, column=1, sticky="ew", padx=(0, 0))
         self._status_bar.grid_columnconfigure(1, weight=1)
         self._status_label = ctk.CTkLabel(
@@ -105,7 +104,8 @@ class PiManagerApp(ctk.CTk):
 
         # 连接状态
         status_frame = ctk.CTkFrame(
-            self._sidebar, fg_color=("gray85", "gray17"), corner_radius=8)
+            self._sidebar, fg_color="transparent", corner_radius=0,
+            border_width=1, border_color=("gray70", "gray35"))
         status_frame.grid(row=1, column=0, sticky="ew", padx=15, pady=(5, 10))
 
         self._conn_indicator = ctk.CTkLabel(
@@ -226,7 +226,7 @@ class PiManagerApp(ctk.CTk):
         frame.grid_rowconfigure(2, weight=0)
 
         # 快捷命令
-        quick_frame = ctk.CTkFrame(frame)
+        quick_frame = ctk.CTkFrame(frame, fg_color="transparent", corner_radius=0)
         quick_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
 
         quick_cmds = [
@@ -258,7 +258,7 @@ class PiManagerApp(ctk.CTk):
         self._terminal_output.grid(row=1, column=0, sticky="nsew", padx=5, pady=2)
 
         # 命令输入行
-        input_frame = ctk.CTkFrame(frame)
+        input_frame = ctk.CTkFrame(frame, fg_color="transparent", corner_radius=0)
         input_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=(2, 5))
         input_frame.grid_columnconfigure(0, weight=1)
 
@@ -332,7 +332,7 @@ class PiManagerApp(ctk.CTk):
         # ===== 外观设置 =====
         self._section_label(scroll, "🎨 外观设置", 0)
 
-        theme_frame = ctk.CTkFrame(scroll)
+        theme_frame = ctk.CTkFrame(scroll, fg_color="transparent", corner_radius=0)
         theme_frame.pack(fill="x", pady=5)
         theme_frame.grid_columnconfigure(1, weight=1)
 
@@ -360,7 +360,7 @@ class PiManagerApp(ctk.CTk):
         # ===== 背景设置 =====
         self._section_label(scroll, "🖼️ 背景设置", 0)
 
-        bg_frame = ctk.CTkFrame(scroll)
+        bg_frame = ctk.CTkFrame(scroll, fg_color="transparent", corner_radius=0)
         bg_frame.pack(fill="x", pady=5)
 
         ctk.CTkLabel(bg_frame, text="背景图片:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
@@ -389,7 +389,7 @@ class PiManagerApp(ctk.CTk):
         # ===== 行为设置 =====
         self._section_label(scroll, "⚡ 行为设置", 0)
 
-        behavior_frame = ctk.CTkFrame(scroll)
+        behavior_frame = ctk.CTkFrame(scroll, fg_color="transparent", corner_radius=0)
         behavior_frame.pack(fill="x", pady=5)
 
         auto_conn_var = ctk.BooleanVar(value=self._config["behavior"]["auto_connect"])
@@ -472,15 +472,9 @@ class PiManagerApp(ctk.CTk):
 
     def _apply_background(self, force=False):
         """应用背景 - 加载图片，递归绘制到所有内容区域 Canvas 上"""
-        import time
-        now = time.time()
-        # 防止短时间重复调用（2秒内只允许一次，force 除外）
-        if not force and hasattr(self, '_bg_last_call') and (now - self._bg_last_call) < 2.0:
-            return
         if hasattr(self, '_bg_applying') and self._bg_applying:
-            return
+            return  # 防止重叠调用
         self._bg_applying = True
-        self._bg_last_call = now
         try:
             self._do_apply_background()
         finally:
