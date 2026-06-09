@@ -702,8 +702,11 @@ class PiManagerApp(ctk.CTk):
         """窗口大小改变时更新背景（防抖 250ms）。"""
         if not hasattr(self, '_content'):
             return
-        cw = self._content.winfo_width()
-        ch = self._content.winfo_height()
+        try:
+            cw = self._content.winfo_width()
+            ch = self._content.winfo_height()
+        except Exception:
+            return  # 窗口已销毁
         if cw < 50 or ch < 50:
             return
         last_size = getattr(self, '_bg_last_size', (0, 0))
@@ -1028,6 +1031,9 @@ class PiManagerApp(ctk.CTk):
         self._stop_sidebar_refresh()
         if hasattr(self, '_status_clock_job'):
             self.after_cancel(self._status_clock_job)
+        if hasattr(self, '_resize_after_id') and self._resize_after_id:
+            self.after_cancel(self._resize_after_id)
+        self.unbind("<Configure>")  # 防止关闭后触发 _on_window_resize
         if self._current_page == "status":
             self._status_panel.stop_auto_refresh()
         self._ssh.disconnect()
