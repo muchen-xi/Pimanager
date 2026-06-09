@@ -29,7 +29,14 @@ QUICK_COMMANDS = [
 # ===== Canvas 终端输出组件（替代 CTkTextbox，真透明看背景） =====
 
 class CanvasTerminalOutput(ctk.CTkFrame):
-    """基于 Canvas 的终端输出区 — 文字直接绘制在能显示背景图的画布上。"""
+    """基于 Canvas 的终端输出区 — 文字直接绘制在能显示背景图的画布上。
+
+    滚动修复：
+    - 鼠标滚轮绑定在容器 Frame 上（而非内部 Canvas），解决 Windows 下焦点不在 Canvas 时无法滚动的问题
+    - 自动滚动标志：用户手动向上滚动时暂停自动追底，滚到底部时恢复
+    - 键盘快捷键：↑↓ PageUp/Down Home/End
+    - 滚动条点击跳转
+    """
 
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color="transparent", corner_radius=0, **kwargs)
@@ -50,15 +57,48 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         self._pad_y = 8
         self._visible_start = 0
 
+        # ★ 自动滚动标志：True=新输出自动追底，False=用户正在查看历史
+        self._auto_scroll = True
+
+        # ★ 防抖：延迟重绘 ID
+        self._redraw_after_id = None
+
         # 字体颜色
         self._text_color = "#C9D1D9"
         self._err_color = "#FF6B6B"
 
-        # 滚动
+        # ===== 滚轮事件绑定 =====
+        # ★ 关键修复：Windows 下 <MouseWheel> 只发给有焦点的 widget
+        # 终端中焦点通常在 CTkEntry（输入框），canvas 永远收不到事件
+        # 解决方案：绑定到容器 Frame（self），同时绑定到 canvas 确保覆盖
+        self.bind("<MouseWheel>", self._on_mousewheel)
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
+        # Linux 滚轮
+        self.bind("<Button-4>", self._on_mousewheel)
+        self.bind("<Button-5>", self._on_mousewheel)
         self._canvas.bind("<Button-4>", self._on_mousewheel)
         self._canvas.bind("<Button-5>", self._on_mousewheel)
+
+        # ===== 键盘滚动绑定 =====
+        self._canvas.bind("<Up>", lambda e: self._scroll_key(-1))
+        self._canvas.bind("<Down>", lambda e: self._scroll_key(1))
+        self._canvas.bind("<Prior>", lambda e: self._scroll_page(-1))   # PageUp
+        self._canvas.bind("<Next>", lambda e: self._scroll_page(1))     # PageDown
+        self._canvas.bind("<Home>", lambda e: self._scroll_home())
+        self._canvas.bind("<End>", lambda e: self._scroll_end())
+        # 让 canvas 可以接收键盘事件
+        self._canvas.bind("<Button-1>", self._on_canvas_click_focus)
+        self._canvas.focus_set()
+
+        # ===== 滚动条拖拽 =====
+        self._canvas.bind("<B1-Motion>", self._on_scrollbar_drag)
+        self._scrollbar_dragging = False
+
+        # 容器大小变化
         self.bind("<Configure>", self._on_resize)
+
+        # ★ 鼠标进入/离开：进入时让 canvas 获取焦点以启用键盘滚动
+        self._canvas.bind("<Enter>", lambda e: self._canvas.focus_set())
 
     def insert(self, position: str, text: str, tag: str = None):
         """追加文本（兼容 CTkTextbox 接口）"""
@@ -68,6 +108,9 @@ class CanvasTerminalOutput(ctk.CTkFrame):
                 self._lines.append((line, color))
             else:
                 self._lines.append(("", color))
+        # ★ 只有自动滚动模式下才追底
+        if self._auto_scroll:
+            self._scroll_to_bottom()
         self._redraw()
 
     def delete(self, start: str, end: str):
@@ -76,21 +119,41 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         self._canvas.delete("text")
         self._text_ids.clear()
         self._visible_start = 0
+        self._auto_scroll = True
 
     def see(self, position: str):
         """滚动到底部"""
+        self._auto_scroll = True
         self._scroll_to_bottom()
 
     def get(self, start: str, end: str) -> str:
         """获取全部文本（兼容 CTkTextbox，用于复制全部）"""
         return "\n".join(line for line, _ in self._lines)
 
-    def _redraw(self):
-        """重绘可见文本行。"""
+    # ===== 核心绘制 =====
+
+    def _redraw(self, delayed: bool = False):
+        """重绘可见文本行。
+
+        Args:
+            delayed: True 时使用 after_idle 延迟合并多次调用
+        """
+        # ★ 防抖：多次快速调用合并为一次 idle 时执行
+        if delayed:
+            if self._redraw_after_id:
+                return
+            self._redraw_after_id = self.after_idle(self._do_redraw)
+            return
+        self._do_redraw()
+
+    def _do_redraw(self):
+        """实际执行重绘。"""
+        self._redraw_after_id = None
         self._canvas.delete("text")
         self._text_ids.clear()
 
         if not self._lines:
+            self._canvas.delete("scrollbar")
             return
 
         cw = self._canvas.winfo_width()
@@ -105,8 +168,12 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         max_visible = max(1, (ch - self._pad_y * 2) // self._line_height)
 
         total = len(self._lines)
-        if self._visible_start > total - max_visible:
-            self._visible_start = max(0, total - max_visible)
+        # ★ 限制 _visible_start 范围
+        max_start = max(0, total - max_visible)
+        if self._visible_start > max_start:
+            self._visible_start = max_start
+        if self._visible_start < 0:
+            self._visible_start = 0
 
         end_idx = min(total, self._visible_start + max_visible)
         y = self._pad_y
@@ -120,13 +187,19 @@ class CanvasTerminalOutput(ctk.CTkFrame):
                 tid = self._canvas.create_text(
                     self._pad_x, y, anchor="nw",
                     text=display, fill=color,
-                    font=("Consolas", 11))
+                    font=("Consolas", 11), tags="text")
                 self._text_ids.append(tid)
             y += self._line_height
+
+        # ★ 更新自动滚动标志：如果可见区域包含最后一行则恢复自动追底
+        if end_idx >= total:
+            self._auto_scroll = True
 
         # 滚动条指示
         if total > max_visible:
             self._draw_scroll_indicator(total, max_visible)
+        else:
+            self._canvas.delete("scrollbar")
 
     def _apply_bg_fragment(self):
         """把背景图片片段绘制到内部 canvas 上。"""
@@ -136,33 +209,89 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         except Exception:
             pass
 
+    # ===== 滚动控制 =====
+
     def _scroll_to_bottom(self):
         """滚动到底部。"""
         ch = self._canvas.winfo_height()
         max_visible = max(1, (ch - self._pad_y * 2) // self._line_height)
         total = len(self._lines)
         self._visible_start = max(0, total - max_visible)
-        self._redraw()
+        self._auto_scroll = True
+        self._do_redraw()
 
     def _scroll(self, delta: int):
         """滚动指定行数。"""
         ch = self._canvas.winfo_height()
         max_visible = max(1, (ch - self._pad_y * 2) // self._line_height)
         total = len(self._lines)
-        self._visible_start = max(0, min(total - max_visible,
-                                         self._visible_start + delta))
-        self._redraw()
+        max_start = max(0, total - max_visible)
+        old_start = self._visible_start
+        self._visible_start = max(0, min(max_start, self._visible_start + delta))
+
+        # ★ 如果用户向上滚动（delta < 0），关闭自动追底
+        if delta < 0 and self._visible_start < max_start:
+            self._auto_scroll = False
+        # ★ 如果滚动到底部，恢复自动追底
+        if self._visible_start >= max_start:
+            self._auto_scroll = True
+
+        if self._visible_start != old_start:
+            self._do_redraw()
+
+    def _scroll_key(self, direction: int):
+        """键盘 ↑↓ 滚动 1 行"""
+        self._scroll(direction)
+
+    def _scroll_page(self, direction: int):
+        """键盘 PageUp/PageDown 滚动一页"""
+        ch = self._canvas.winfo_height()
+        max_visible = max(1, (ch - self._pad_y * 2) // self._line_height)
+        self._scroll(direction * max(1, max_visible - 2))
+
+    def _scroll_home(self):
+        """键盘 Home 滚动到顶部"""
+        self._visible_start = 0
+        self._auto_scroll = False
+        self._do_redraw()
+
+    def _scroll_end(self):
+        """键盘 End 滚动到底部"""
+        self._scroll_to_bottom()
+
+    # ===== 事件处理 =====
+
+    def _on_canvas_click_focus(self, event):
+        """点击 canvas 时获取焦点（启用键盘滚动）。"""
+        self._canvas.focus_set()
+
+        # ★ 检测是否点击了滚动条区域，是则跳转
+        cw = self._canvas.winfo_width()
+        bar_x = cw - 8  # 滚动条区域
+        if event.x >= bar_x:
+            self._on_scrollbar_click(event)
 
     def _on_mousewheel(self, event):
-        """鼠标滚轮滚动。"""
-        if event.num == 4 or event.delta > 0:
+        """鼠标滚轮滚动 — 统一处理 Windows 和 Linux 事件。"""
+        # Windows / macOS: event.delta (正=向上, 负=向下)
+        # Linux: event.num (4=向上, 5=向下)
+        if hasattr(event, 'num') and event.num == 4:
             self._scroll(-3)
-        elif event.num == 5 or event.delta < 0:
+        elif hasattr(event, 'num') and event.num == 5:
             self._scroll(3)
+        elif hasattr(event, 'delta'):
+            # Windows: delta 通常是 ±120 的整数倍
+            # macOS: delta 可能是任意值
+            lines = int(event.delta / 40)  # ~3 行每格
+            self._scroll(-lines if lines != 0 else (-1 if event.delta > 0 else 1))
 
     def _on_resize(self, event=None):
-        """容器大小变化时重绘。"""
-        self._redraw()
+        """容器大小变化时重绘（带防抖）。"""
+        if event and event.widget is not self:
+            return  # 忽略子 widget 的 Configure 事件
+        self._redraw(delayed=True)
+
+    # ===== 滚动条 =====
 
     def _draw_scroll_indicator(self, total: int, visible: int):
         """绘制滚动条指示器。"""
@@ -173,11 +302,76 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         bar_w = 4
         bar_x = cw - bar_w - 4
         bar_h = max(20, int(ch * visible / total))
-        bar_y = int((ch - bar_h) * self._visible_start / max(1, total - visible))
+        max_scroll = max(1, total - visible)
+        bar_y = int((ch - bar_h) * self._visible_start / max_scroll)
         self._canvas.delete("scrollbar")
+        # 滚动条轨道
+        self._canvas.create_rectangle(
+            bar_x - 1, 0, bar_x + bar_w + 1, ch,
+            fill="#1A1A1A", outline="", tags=("scrollbar", "scrollbar_track"))
+        # 滚动条滑块
         self._canvas.create_rectangle(
             bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
-            fill="#555555", outline="", tags="scrollbar")
+            fill="#555555", outline="", tags=("scrollbar", "scrollbar_thumb"))
+
+    def _on_scrollbar_click(self, event):
+        """点击滚动条轨道 → 跳转到对应位置。"""
+        cw = self._canvas.winfo_width()
+        ch = self._canvas.winfo_height()
+        if ch < 20:
+            return
+
+        total = len(self._lines)
+        visible = max(1, (ch - self._pad_y * 2) // self._line_height)
+        if total <= visible:
+            return
+
+        # 按点击位置比例计算目标行
+        ratio = event.y / ch
+        max_start = total - visible
+        self._visible_start = int(ratio * max_start)
+        self._visible_start = max(0, min(max_start, self._visible_start))
+
+        # 点击底部区域恢复自动滚动
+        if ratio > 0.85:
+            self._auto_scroll = True
+            self._visible_start = max_start
+        else:
+            self._auto_scroll = False
+
+        self._do_redraw()
+        self._scrollbar_dragging = True
+
+    def _on_scrollbar_drag(self, event):
+        """拖拽滚动条滑块。"""
+        if not self._scrollbar_dragging:
+            return
+        cw = self._canvas.winfo_width()
+        ch = self._canvas.winfo_height()
+        if ch < 20:
+            return
+
+        total = len(self._lines)
+        visible = max(1, (ch - self._pad_y * 2) // self._line_height)
+        if total <= visible:
+            return
+
+        ratio = event.y / ch
+        max_start = total - visible
+        self._visible_start = int(ratio * max_start)
+        self._visible_start = max(0, min(max_start, self._visible_start))
+
+        if self._visible_start >= max_start:
+            self._auto_scroll = True
+        else:
+            self._auto_scroll = False
+
+        self._do_redraw()
+
+        # 释放鼠标时停止拖拽
+        def _stop_drag(e):
+            self._scrollbar_dragging = False
+        self._canvas.bind("<ButtonRelease-1>", _stop_drag, add="+")
 
 
 class TerminalSession:
@@ -226,6 +420,8 @@ class TerminalTab:
         self._session = session
         self._app = app_ref
         self._running = False
+        self._stream_var = False  # 流式模式开关
+        self._stream_handle = None  # 流式命令句柄
 
         # 容器
         self.frame = ctk.CTkFrame(master, fg_color="transparent", corner_radius=0)
@@ -273,9 +469,32 @@ class TerminalTab:
         self._entry.bind("<Return>", self._on_send)
         self._entry.bind("<Up>", self._on_history_up)
         self._entry.bind("<Down>", self._on_history_down)
+        self._entry.bind("<Control-c>", self._on_ctrl_c)  # ★ Ctrl+C 中止流式命令
 
-        # 发送按钮
-        ctk.CTkButton(
+        # ★ 输入框滚轮事件转发到输出区
+        self._entry.bind("<MouseWheel>", self._forward_wheel)
+        self._entry.bind("<Button-4>", self._forward_wheel)
+        self._entry.bind("<Button-5>", self._forward_wheel)
+
+        # 流式输出切换开关
+        self._stream_toggle_var = ctk.BooleanVar(value=False)
+        self._stream_toggle = ctk.CTkSwitch(
+            input_frame,
+            text="流式",
+            variable=self._stream_toggle_var,
+            width=50,
+            font=ctk.CTkFont(size=11),
+            border_width=1,
+            switch_width=32,
+            switch_height=16,
+            fg_color="#555555",
+            progress_color="#2B5B2B",
+            command=self._on_toggle_stream,
+        )
+        self._stream_toggle.grid(row=0, column=2, padx=(0, 4), pady=6)
+
+        # 发送/停止按钮
+        self._send_btn = ctk.CTkButton(
             input_frame,
             text="▶",
             width=36,
@@ -284,7 +503,12 @@ class TerminalTab:
             command=self._on_send,
             fg_color="#2B5B2B",
             hover_color="#3A7A3A",
-        ).grid(row=0, column=2, padx=(0, 8), pady=6)
+        )
+        self._send_btn.grid(row=0, column=3, padx=(0, 8), pady=6)
+
+    def _forward_wheel(self, event):
+        """将输入框上的滚轮事件转发到输出区。"""
+        self._output._on_mousewheel(event)
 
     def _print_banner(self):
         """欢迎横幅"""
@@ -292,6 +516,7 @@ class TerminalTab:
 ║  🥧 PiManager Terminal — {self._session.name: <28}║
 ║  树莓派 Zero W · 轻量远程命令终端           ║
 ║  ↑↓ 浏览历史 · 多标签并行操作               ║
+║  🖱 滚轮滚动 · 点击滚动条跳转               ║
 ╚══════════════════════════════════════════════╝
 """
         self._output.insert("end", banner)
@@ -300,11 +525,19 @@ class TerminalTab:
     def _log(self, text: str, tag: str = None):
         """向输出区追加文本"""
         self._output.insert("end", text, tag)
-        self._output.see("end")
+        # ★ 自动追底由 CanvasTerminalOutput 内部的 _auto_scroll 控制
 
     def _on_send(self, event=None):
-        """发送命令"""
+        """发送命令（或停止流式命令）"""
         cmd = self._entry.get().strip()
+
+        # ★ 如果流式命令正在运行，先中止它
+        if self._running and self._stream_var and self._stream_handle:
+            self._stop_streaming()
+            if not cmd:  # 空输入 = 仅中止
+                return
+            # 否则继续执行新命令
+
         self._entry.delete(0, "end")
         self._session.reset_history_index()
 
@@ -330,6 +563,14 @@ class TerminalTab:
         self._running = True
         self._entry.configure(state="disabled", placeholder_text="执行中...")
 
+        if self._stream_var:
+            self._exec_streaming(cmd)
+        else:
+            self._exec_blocking(cmd)
+
+    def _exec_blocking(self, cmd):
+        """阻塞式命令执行（原有逻辑）"""
+
         def _exec():
             try:
                 code, out, err = self._ssh.exec_command(cmd, timeout=120)
@@ -338,6 +579,71 @@ class TerminalTab:
                 self.frame.after(0, lambda: self._on_result("", str(e), cmd))
 
         threading.Thread(target=_exec, daemon=True).start()
+
+    def _exec_streaming(self, cmd):
+        """流式命令执行 — 输出实时推送到终端"""
+        self._stream_handle = None
+        self._send_btn.configure(text="⏹", fg_color="#8B0000", hover_color="#A00000")
+        self._stream_toggle.configure(state="disabled")
+
+        def on_stdout(line):
+            self.frame.after(0, lambda l=line: self._log(l))
+
+        def on_stderr(line):
+            self.frame.after(0, lambda l=line: self._log(l, "stderr"))
+
+        def on_done(exit_code, error):
+            self.frame.after(0, lambda: self._on_streaming_done(exit_code, error, cmd))
+
+        self._stream_handle = self._ssh.exec_command_streaming(
+            cmd, on_stdout=on_stdout, on_stderr=on_stderr, on_done=on_done)
+
+    def _stop_streaming(self):
+        """中止正在运行的流式命令 — 先发 Ctrl+C 优雅终止，1.5s 后不响应则强制关闭"""
+        if self._stream_handle:
+            self._stream_handle.send_ctrl_c()  # 发送 \x03 (SIGINT) 到 PTY
+            # 如果进程在 1.5s 内未退出，强制关闭通道
+            self.frame.after(1500, self._force_cancel_if_running)
+        self._log("\n⏹ Ctrl+C (SIGINT) 已发送...\n", "stderr")
+
+    def _force_cancel_if_running(self):
+        """Ctrl+C 宽限期过后，进程仍未退出则强制关闭通道"""
+        if self._stream_handle and self._stream_handle.is_running:
+            self._stream_handle.cancel()
+            self._log("⚠ 进程未响应 SIGINT，已强制关闭通道\n", "stderr")
+            self._finish_streaming()
+
+    def _on_ctrl_c(self, event=None):
+        """Ctrl+C 键盘快捷键 — 中止流式命令"""
+        if self._running and self._stream_handle:
+            self._stop_streaming()
+            return "break"  # 中止时阻止默认复制行为
+        # 没有流式命令在跑时不拦截，保留 tkinter 默认 Ctrl+C 复制功能
+
+    def _on_streaming_done(self, exit_code, error, cmd):
+        """流式命令完成回调"""
+        if error:
+            self._log(f"\n❌ 错误: {error}\n", "stderr")
+        elif exit_code != 0:
+            self._log(f"\n📋 退出码: {exit_code}\n")
+        else:
+            self._log(f"\n✅ 完成 (退出码 {exit_code})\n")
+        self._finish_streaming()
+
+    def _finish_streaming(self):
+        """恢复 UI 状态（流式命令结束后）"""
+        self._running = False
+        self._stream_handle = None
+        self._send_btn.configure(text="▶", fg_color="#2B5B2B", hover_color="#3A7A3A")
+        self._stream_toggle.configure(state="normal")
+        self._entry.configure(state="normal", placeholder_text="输入命令...")
+        self._entry.focus_set()
+        if hasattr(self._app, '_status_label'):
+            self._app._status_label.configure(text="就绪")
+
+    def _on_toggle_stream(self):
+        """流式开关切换"""
+        self._stream_var = self._stream_toggle_var.get()
 
     def _on_result(self, stdout: str, stderr: str, cmd: str):
         """命令结果回调"""

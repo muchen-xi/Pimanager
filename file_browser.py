@@ -10,10 +10,13 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, Menu
 
 
-# ===== Canvas 文件列表组件（替代 CTkScrollableFrame+CTkFrame，真透明看背景） =====
+# ===== Canvas 列表公共基类（消除 CanvasFileList / LocalFileList 重复代码） =====
 
-class CanvasFileList(ctk.CTkFrame):
-    """基于 Canvas 的文件列表 — 一个画布渲染所有行，单个背景片段，不跳动。"""
+class _CanvasListBase(ctk.CTkFrame):
+    """Canvas 文件列表基类 — 统一滚动、渲染、背景绘制逻辑。
+
+    子类只需实现：refresh/navigate 等数据获取方法。
+    """
 
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color="transparent", corner_radius=0, **kwargs)
@@ -30,17 +33,22 @@ class CanvasFileList(ctk.CTkFrame):
         self._row_height = 32
         self._selected_idx = -1
         self._pad_x = 8
+        self._scroll_y = 0
 
-        # 回调（由 FileBrowser 设置）
+        # 回调（由外部设置）
         self.on_click = None       # (index, item)
         self.on_double_click = None  # (item)
         self.on_right_click = None   # (event, item)
 
-        # 滚动
-        self._scroll_y = 0
+        # ★ 滚轮事件绑定到容器 Frame（修复 Windows 焦点问题）
+        self.bind("<MouseWheel>", self._on_mousewheel)
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.bind("<Button-4>", lambda e: self._scroll(-60))
+        self.bind("<Button-5>", lambda e: self._scroll(60))
         self._canvas.bind("<Button-4>", lambda e: self._scroll(-60))
         self._canvas.bind("<Button-5>", lambda e: self._scroll(60))
+
+        # 点击事件
         self._canvas.bind("<Button-1>", self._on_canvas_click)
         self._canvas.bind("<Double-Button-1>", self._on_canvas_double)
         self._canvas.bind("<Button-3>", self._on_canvas_right)
@@ -49,6 +57,48 @@ class CanvasFileList(ctk.CTkFrame):
         # 背景引用
         self._bg_refs = []
 
+    # ===== 子类覆盖 =====
+
+    def _file_icon(self, item: dict) -> str:
+        """文件图标 — 子类可覆盖。"""
+        name = item["name"]
+        if item["is_dir"]:
+            return "📁"
+        ext_map = {
+            ".py": "🐍", ".py3": "🐍", ".sh": "📜", ".bash": "📜",
+            ".txt": "📝", ".md": "📝", ".log": "📝",
+            ".conf": "📝", ".cfg": "📝", ".json": "📝",
+            ".jpg": "🖼️", ".jpeg": "🖼️", ".png": "🖼️",
+            ".gif": "🖼️", ".bmp": "🖼️", ".webp": "🖼️",
+            ".zip": "📦", ".tar": "📦", ".gz": "📦",
+            ".bz2": "📦", ".xz": "📦", ".7z": "📦",
+            ".mp3": "🎵", ".wav": "🎵", ".ogg": "🎵", ".flac": "🎵",
+            ".mp4": "🎬", ".avi": "🎬", ".mkv": "🎬", ".mov": "🎬",
+        }
+        for ext, icon in ext_map.items():
+            if name.endswith(ext):
+                return icon
+        return "📄"
+
+    def _format_size(self, item: dict) -> str:
+        """文件大小格式化 — 子类可覆盖。"""
+        if item["is_dir"]:
+            return "--"
+        size = item["size"]
+        if size >= 1073741824:
+            return f"{size/1073741824:.1f} GB"
+        elif size >= 1048576:
+            return f"{size/1048576:.1f} MB"
+        elif size >= 1024:
+            return f"{size/1024:.1f} KB"
+        return f"{size} B"
+
+    def _get_name_color(self, item: dict) -> str:
+        """文件名颜色 — 子类可覆盖（如本地文件用蓝色）。"""
+        return "#C9D1D9"
+
+    # ===== 公共 API =====
+
     def set_items(self, items: list[dict]):
         """设置文件列表数据。"""
         self._items = items
@@ -56,8 +106,13 @@ class CanvasFileList(ctk.CTkFrame):
         self._scroll_y = 0
         self._redraw()
 
-    def _on_resize(self, event=None):
-        self._redraw()
+    def get_selected(self):
+        """返回当前选中项。"""
+        if 0 <= self._selected_idx < len(self._items):
+            return self._items[self._selected_idx]
+        return None
+
+    # ===== 渲染 =====
 
     def _apply_bg(self):
         """绘制背景图片片段到 canvas。"""
@@ -111,17 +166,15 @@ class CanvasFileList(ctk.CTkFrame):
                 c.create_rectangle(
                     0, y, cw, y + self._row_height,
                     fill="#2A5A2A", outline="", tags=("row", f"row_{i}"))
-            else:
-                # 行背景透明
-                pass
 
             # 图标
             icon = self._file_icon(item)
             name_x = self._pad_x + 4
+            name_color = self._get_name_color(item)
             c.create_text(
                 name_x, y + self._row_height // 2,
                 text=f"{icon}  {item['name']}", anchor="w",
-                fill="#C9D1D9", font=("Segoe UI", 12),
+                fill=name_color, font=("Segoe UI", 12),
                 tags=("row", f"row_{i}"))
 
             # 大小
@@ -155,55 +208,36 @@ class CanvasFileList(ctk.CTkFrame):
                 bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
                 fill="#555555", outline="", tags="scrollbar")
 
-    @staticmethod
-    def _file_icon(item: dict) -> str:
-        name = item["name"]
-        if item["is_dir"]:
-            return "📁"
-        ext_map = {
-            ".py": "🐍", ".py3": "🐍", ".sh": "📜", ".bash": "📜",
-            ".txt": "📝", ".md": "📝", ".log": "📝",
-            ".conf": "📝", ".cfg": "📝", ".json": "📝",
-            ".jpg": "🖼️", ".jpeg": "🖼️", ".png": "🖼️",
-            ".gif": "🖼️", ".bmp": "🖼️", ".webp": "🖼️",
-            ".zip": "📦", ".tar": "📦", ".gz": "📦",
-            ".bz2": "📦", ".xz": "📦", ".7z": "📦",
-            ".mp3": "🎵", ".wav": "🎵", ".ogg": "🎵", ".flac": "🎵",
-            ".mp4": "🎬", ".avi": "🎬", ".mkv": "🎬", ".mov": "🎬",
-        }
-        for ext, icon in ext_map.items():
-            if name.endswith(ext):
-                return icon
-        return "📄"
+    def _on_resize(self, event=None):
+        if event and event.widget is not self:
+            return
+        self._redraw()
 
-    @staticmethod
-    def _format_size(item: dict) -> str:
-        if item["is_dir"]:
-            return "--"
-        size = item["size"]
-        if size >= 1073741824:
-            return f"{size/1073741824:.1f} GB"
-        elif size >= 1048576:
-            return f"{size/1048576:.1f} MB"
-        elif size >= 1024:
-            return f"{size/1024:.1f} KB"
-        return f"{size} B"
+    # ===== 滚动 =====
 
     def _scroll(self, dy: int):
         self._scroll_y += dy
         self._redraw()
 
     def _on_mousewheel(self, event):
-        if event.delta > 0:
+        """统一鼠标滚轮处理。"""
+        if hasattr(event, 'num') and event.num == 4:
             self._scroll(-40)
-        elif event.delta < 0:
+        elif hasattr(event, 'num') and event.num == 5:
             self._scroll(40)
+        elif hasattr(event, 'delta'):
+            lines = int(event.delta / 40)
+            self._scroll(-lines if lines != 0 else (-1 if event.delta > 0 else 1))
+
+    # ===== 行定位 =====
 
     def _get_row_at_y(self, y: int) -> int:
         idx = (self._scroll_y + y) // self._row_height
         if 0 <= idx < len(self._items):
             return idx
         return -1
+
+    # ===== 鼠标事件 =====
 
     def _on_canvas_click(self, event):
         idx = self._get_row_at_y(event.y)
@@ -229,40 +263,25 @@ class CanvasFileList(ctk.CTkFrame):
             if self.on_right_click:
                 self.on_right_click(event, self._items[idx])
 
-    def get_selected(self):
-        if 0 <= self._selected_idx < len(self._items):
-            return self._items[self._selected_idx]
-        return None
 
+# ===== 远程文件列表（Canvas 渲染） =====
 
-# ===== 本地文件列表（复制 CanvasFileList 的渲染模式） =====
-
-class LocalFileList(ctk.CTkFrame):
-    """本地文件列表 — 完全复用 CanvasFileList 的 Canvas 渲染逻辑。"""
+class CanvasFileList(_CanvasListBase):
+    """远程文件列表 — 基于 Canvas 渲染，真透明看背景。"""
 
     def __init__(self, master, **kwargs):
-        super().__init__(master, fg_color="transparent", corner_radius=0, **kwargs)
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        self._canvas = tk.Canvas(self, highlightthickness=0, bd=0, bg="#0D1117")
-        self._canvas.grid(row=0, column=0, sticky="nsew")
-        self._items: list[dict] = []
-        self._row_height = 32
-        self._selected_idx = -1
-        self._pad_x = 8
-        self._scroll_y = 0
+        super().__init__(master, **kwargs)
+        # 所有核心逻辑已在基类中
+
+
+# ===== 本地文件列表（Canvas 渲染） =====
+
+class LocalFileList(_CanvasListBase):
+    """本地文件列表 — 完全复用基类 Canvas 渲染逻辑，本地文件用蓝色区分。"""
+
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
         self._current_path = str(Path.home())
-        self.on_click = None
-        self.on_double_click = None
-        self.on_right_click = None
-        self._canvas.bind("<MouseWheel>", self._on_mousewheel)
-        self._canvas.bind("<Button-4>", lambda e: self._scroll(-60))
-        self._canvas.bind("<Button-5>", lambda e: self._scroll(60))
-        self._canvas.bind("<Button-1>", self._on_canvas_click)
-        self._canvas.bind("<Double-Button-1>", self._on_canvas_double)
-        self._canvas.bind("<Button-3>", self._on_canvas_right)
-        self.bind("<Configure>", self._on_resize)
-        self._bg_refs = []
 
     @property
     def current_path(self):
@@ -295,94 +314,9 @@ class LocalFileList(ctk.CTkFrame):
             self.after(0, lambda: self.set_items(items))
         threading.Thread(target=_load, daemon=True).start()
 
-    def set_items(self, items: list[dict]):
-        self._items = items
-        self._selected_idx = -1
-        self._scroll_y = 0
-        self._redraw()
-
-    def _on_resize(self, event=None):
-        self._redraw()
-
-    def _apply_bg(self):
-        try:
-            from .app import BackgroundManager
-            BackgroundManager.make_canvas_transparent(self._canvas)
-        except Exception:
-            pass
-
-    def _redraw(self):
-        c = self._canvas
-        c.delete("row")
-        c.delete("scrollbar")
-        if not self._items:
-            return
-        self._apply_bg()
-        cw = c.winfo_width(); ch = c.winfo_height()
-        if cw < 20: return
-        col_size, col_time = 90, 160
-        col_name = cw - col_size - col_time - self._pad_x * 4
-        total = len(self._items)
-        visible = max(1, ch // self._row_height)
-        max_scroll = max(0, total * self._row_height - ch)
-        self._scroll_y = max(0, min(self._scroll_y, max_scroll))
-        start = self._scroll_y // self._row_height
-        end = min(total, start + visible + 1)
-        off = -(self._scroll_y % self._row_height)
-        for i in range(start, end):
-            y = off + (i - start) * self._row_height
-            item = self._items[i]
-            if i == self._selected_idx:
-                c.create_rectangle(0, y, cw, y + self._row_height,
-                                   fill="#2A5A2A", outline="", tags=("row", f"row_{i}"))
-            icon = CanvasFileList._file_icon(item)
-            sz = CanvasFileList._format_size(item)
-            c.create_text(self._pad_x + 4, y + self._row_height // 2,
-                          text=f"{icon}  {item['name']}", anchor="w",
-                          fill="#8BCCFF", font=("Segoe UI", 12),
-                          tags=("row", f"row_{i}"))
-            sx = self._pad_x + col_name + 10
-            c.create_text(sx + col_size, y + self._row_height // 2,
-                          text=sz, anchor="e", fill="#8B949E",
-                          font=("Segoe UI", 11), tags=("row", f"row_{i}"))
-            tx = sx + col_size + col_time + 10
-            try:
-                ts = datetime.datetime.fromtimestamp(item["mtime"]).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                ts = "--"
-            c.create_text(tx, y + self._row_height // 2, text=ts,
-                          anchor="e", fill="#8B949E", font=("Segoe UI", 11),
-                          tags=("row", f"row_{i}"))
-        if total > visible:
-            bar_w, bar_x = 4, cw - 8
-            bar_h = max(20, int(ch * visible / total))
-            bar_y = int((ch - bar_h) * self._scroll_y / max(1, max_scroll))
-            c.create_rectangle(bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
-                               fill="#555555", outline="", tags="scrollbar")
-
-    def _scroll(self, dy): self._scroll_y += dy; self._redraw()
-    def _on_mousewheel(self, event):
-        self._scroll(-40 if event.delta > 0 else 40)
-    def _get_row_at_y(self, y):
-        idx = (self._scroll_y + y) // self._row_height
-        return idx if 0 <= idx < len(self._items) else -1
-    def _on_canvas_click(self, event):
-        idx = self._get_row_at_y(event.y)
-        if idx >= 0:
-            self._selected_idx = idx; self._redraw()
-            if self.on_click: self.on_click(idx, self._items[idx])
-    def _on_canvas_double(self, event):
-        idx = self._get_row_at_y(event.y)
-        if idx >= 0:
-            self._selected_idx = idx; self._redraw()
-            if self.on_double_click: self.on_double_click(self._items[idx])
-    def _on_canvas_right(self, event):
-        idx = self._get_row_at_y(event.y)
-        if idx >= 0:
-            self._selected_idx = idx; self._redraw()
-            if self.on_right_click: self.on_right_click(event, self._items[idx])
-    def get_selected(self):
-        return self._items[self._selected_idx] if 0 <= self._selected_idx < len(self._items) else None
+    def _get_name_color(self, item: dict) -> str:
+        """本地文件名使用蓝色以区分远程。"""
+        return "#8BCCFF"
 
 
 class FileBrowser(ctk.CTkFrame):
