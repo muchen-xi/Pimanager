@@ -107,6 +107,13 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         # ★ 鼠标进入/离开：进入时让 canvas 获取焦点以启用键盘滚动
         self._canvas.bind("<Enter>", lambda e: self._canvas.focus_set())
 
+    def refresh_theme(self):
+        """主题切换后刷新 Canvas 背景色和文字颜色。"""
+        self._canvas.configure(bg=ThemeColors.get("canvas_bg"))
+        self._text_color = ThemeColors.get("canvas_text")
+        self._err_color = ThemeColors.get("canvas_err")
+        self._do_redraw()
+
     def insert(self, position: str, text: str, tag: str = None):
         """追加文本（兼容 CTkTextbox 接口）"""
         color = self._err_color if tag == "stderr" else self._text_color

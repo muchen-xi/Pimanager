@@ -105,6 +105,11 @@ class _CanvasListBase(ctk.CTkFrame):
         """文件名颜色 — 子类可覆盖（如本地文件用蓝色）。"""
         return ThemeColors.get("canvas_text")
 
+    def refresh_theme(self):
+        """主题切换后刷新 Canvas 背景色。"""
+        self._canvas.configure(bg=ThemeColors.get("canvas_bg"))
+        self._redraw()
+
     # ===== 公共 API =====
 
     def set_items(self, items: list[dict]):
