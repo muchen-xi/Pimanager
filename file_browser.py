@@ -330,8 +330,8 @@ class LocalFileList(_CanvasListBase):
                             continue
                         items.append({"name": entry.name, "size": st.st_size,
                                        "mtime": st.st_mtime, "is_dir": entry.is_dir()})
-            except PermissionError:
-                pass
+            except (PermissionError, FileNotFoundError, OSError):
+                pass  # 无权限 / 路径不存在 / 其他 IO 错误 → 显示为空
             items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
             self.after(0, lambda: self.set_items(items))
         threading.Thread(target=_load, daemon=True).start()
@@ -432,11 +432,32 @@ class FileBrowser(ctk.CTkFrame):
         self._file_list.on_double_click = self._on_double_click
         self._file_list.on_right_click = self._on_right_click
 
-        # ★ 本地列表（双栏模式下显示）
+        # ★ 本地面板容器（双栏模式专用：nav + list）
+        self._dual_pane = ctk.CTkFrame(
+            self._list_container, fg_color="transparent", corner_radius=0)
+        self._dual_pane.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        self._dual_pane.grid_remove()
+        self._dual_pane.grid_columnconfigure(0, weight=1)
+        self._dual_pane.grid_rowconfigure(0, weight=0)  # 本地导航
+        self._dual_pane.grid_rowconfigure(1, weight=0)  # 本地表头
+        self._dual_pane.grid_rowconfigure(2, weight=1)  # 本地列表
+
+        # 本地导航栏
+        self._local_nav = self._build_local_nav(self._dual_pane)
+
+        # 本地列表头（精简版）
+        local_header = ctk.CTkFrame(
+            self._dual_pane, height=22, fg_color="transparent", corner_radius=0)
+        local_header.grid(row=1, column=0, sticky="ew")
+        ctk.CTkLabel(local_header, text="💻 本地文件", anchor="w",
+                     font=ctk.CTkFont(size=10, weight="bold"),
+                     text_color=ThemeColors.get("local_file_name")).pack(
+            side="left", padx=8)
+
+        # 本地文件列表
         self._local_list = LocalFileList(
-            self._list_container, border_width=1, border_color=("gray55", "gray35"))
-        self._local_list.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        self._local_list.grid_remove()
+            self._dual_pane, border_width=1, border_color=("gray55", "gray35"))
+        self._local_list.grid(row=2, column=0, sticky="nsew")
         self._local_list.on_click = self._on_local_click
         self._local_list.on_double_click = self._on_local_double
         self._local_list.on_right_click = self._on_local_right
@@ -832,6 +853,54 @@ class FileBrowser(ctk.CTkFrame):
             else:
                 messagebox.showerror("重命名失败", msg)
 
+    # ===== 本地导航栏 =====
+
+    def _build_local_nav(self, parent):
+        """构建本地面板导航栏（仅双栏模式可见）。"""
+        nav = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=0)
+        nav.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+
+        ctk.CTkButton(
+            nav, text="🏠", width=32, height=22,
+            font=ctk.CTkFont(size=11),
+            fg_color="transparent", hover_color="#333",
+            command=lambda: self._local_navigate(str(Path.home()))
+        ).pack(side="left", padx=1)
+
+        ctk.CTkButton(
+            nav, text="⬆", width=32, height=22,
+            font=ctk.CTkFont(size=11),
+            fg_color="transparent", hover_color="#333",
+            command=self._local_go_up
+        ).pack(side="left", padx=1)
+
+        self._local_path_label = ctk.CTkLabel(
+            nav, text="", anchor="w",
+            font=ctk.CTkFont(size=10), text_color="gray")
+        self._local_path_label.pack(side="left", fill="x", expand=True, padx=4)
+
+        ctk.CTkButton(
+            nav, text="🔄", width=32, height=22,
+            font=ctk.CTkFont(size=11),
+            fg_color="transparent", hover_color="#333",
+            command=lambda: self._local_list.refresh()
+        ).pack(side="right", padx=1)
+
+        return nav
+
+    def _local_navigate(self, path: str):
+        """本地导航到指定路径。"""
+        self._local_path = path
+        self._local_path_label.configure(
+            text=path if len(path) < 50 else "…" + path[-47:])
+        self._local_list.navigate(path)
+
+    def _local_go_up(self):
+        """本地返回上级目录。"""
+        parent = str(Path(self._local_path).parent)
+        if parent and parent != self._local_path:
+            self._local_navigate(parent)
+
     # ===== 双栏模式 =====
 
     def _toggle_mode(self):
@@ -840,14 +909,14 @@ class FileBrowser(ctk.CTkFrame):
             self._mode = "dual"
             self._btn_mode.configure(text="📂 单栏", fg_color="#2A5A2A", hover_color="#3A6A3A")
             self._list_container.grid_columnconfigure(1, weight=1)
-            self._local_list.grid()
+            self._dual_pane.grid()
             self._btn_to_local.pack(side="left", padx=2)
             self._btn_to_remote.pack(side="left", padx=2)
-            self._local_list.navigate(self._local_path)
+            self._local_navigate(self._local_path)
         else:
             self._mode = "single"
             self._btn_mode.configure(text="📂 双栏", fg_color="#1E3A5A", hover_color="#2A4A6A")
-            self._local_list.grid_remove()
+            self._dual_pane.grid_remove()
             self._btn_to_local.pack_forget()
             self._btn_to_remote.pack_forget()
             self._list_container.grid_columnconfigure(1, weight=0)
@@ -859,8 +928,12 @@ class FileBrowser(ctk.CTkFrame):
 
     def _on_local_double(self, item):
         if item["is_dir"]:
-            self._local_path = os.path.join(self._local_path, item["name"])
-            self._local_list.navigate(self._local_path)
+            self._local_navigate(
+                os.path.join(self._local_path, item["name"]))
+        else:
+            # 双击本地文件 → 直接上传到树莓派
+            self._upload_specific(
+                os.path.join(self._local_path, item["name"]))
 
     def _on_local_right(self, event, item):
         full = os.path.join(self._local_path, item["name"])
