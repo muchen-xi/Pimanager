@@ -48,6 +48,7 @@ class BackgroundManager:
     _excluded_widgets: set = set()
     _processed_canvases: dict = {}  # canvas id → (width, height) 缓存
     _blended_cache: dict = {}  # ★ (bg_path, opacity, size) → PIL Image 缓存
+    _batch_mode: bool = False  # ★ 批量模式：跳过逐控件回调，最后统一刷新
 
     # ========== 公开 API ==========
 
@@ -250,7 +251,12 @@ class BackgroundManager:
 
     @classmethod
     def _on_widget_draw(cls, widget):
-        """控件 _draw() 后回调：透明化 canvas + 绘制背景片段 + 同步内部 widget bg。"""
+        """控件 _draw() 后回调：透明化 canvas + 绘制背景片段 + 同步内部 widget bg。
+
+        批量模式下跳过（由 _force_draw 最后统一处理），避免 N 次递归触发。
+        """
+        if cls._batch_mode:
+            return
         if not cls._enabled or not cls._bg_tk_full:
             return
         if not cls._content_frame:
@@ -281,18 +287,19 @@ class BackgroundManager:
     def _sync_inner_widget_bg(cls, widget, wx, wy, cw, ch):
         """同步 CTkTextbox/CTkEntry 内部 tk widget 背景色。"""
         color = cls.sample_bg_color(wx, wy, cw, ch)
+        insert_color = ThemeColors.get("canvas_text")
         if isinstance(widget, ctk.CTkTextbox) and hasattr(widget, '_textbox'):
             try:
                 widget._textbox.configure(
                     bg=color, highlightthickness=0, borderwidth=0,
-                    insertbackground="#C9D1D9")
+                    insertbackground=insert_color)
             except Exception:
                 pass
         if isinstance(widget, ctk.CTkEntry) and hasattr(widget, '_entry'):
             try:
                 widget._entry.configure(
                     bg=color, highlightthickness=0, borderwidth=0,
-                    insertbackground="#C9D1D9", relief="flat")
+                    insertbackground=insert_color, relief="flat")
             except Exception:
                 pass
 
@@ -303,7 +310,18 @@ class BackgroundManager:
 
     @classmethod
     def _force_draw(cls, widget):
-        """递归触发所有后代控件 _draw()。"""
+        """递归触发所有后代控件 _draw()，批量模式避免 N 次背景重绘。"""
+        cls._batch_mode = True
+        try:
+            cls._force_draw_impl(widget)
+        finally:
+            cls._batch_mode = False
+            # 批量完成后统一刷新一次所有背景
+            cls._batch_refresh_backgrounds(widget)
+
+    @classmethod
+    def _force_draw_impl(cls, widget):
+        """递归 _draw()（不触发逐控件背景重绘）。"""
         try:
             if hasattr(widget, '_draw'):
                 widget._draw()
@@ -311,7 +329,29 @@ class BackgroundManager:
             pass
         if hasattr(widget, 'winfo_children'):
             for child in widget.winfo_children():
-                cls._force_draw(child)
+                cls._force_draw_impl(child)
+
+    @classmethod
+    def _batch_refresh_backgrounds(cls, widget):
+        """_force_draw 完成后统一刷新所有 Canvas 背景（一次遍历）。"""
+        try:
+            if hasattr(widget, '_canvas'):
+                try:
+                    c = widget._canvas
+                    if c.winfo_exists():
+                        cw, ch = c.winfo_width(), c.winfo_height()
+                        if cw >= 3 and ch >= 3:
+                            cls.make_canvas_transparent(c, force=True)
+                            wx = c.winfo_rootx() - cls._content_frame.winfo_rootx()
+                            wy = c.winfo_rooty() - cls._content_frame.winfo_rooty()
+                            cls._sync_inner_widget_bg(widget, wx, wy, cw, ch)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        if hasattr(widget, 'winfo_children'):
+            for child in widget.winfo_children():
+                cls._batch_refresh_backgrounds(child)
 
     @classmethod
     def _is_descendant_of_content(cls, widget) -> bool:
@@ -732,10 +772,22 @@ class PiManagerApp(ctk.CTk):
         if BackgroundManager._enabled:
             BackgroundManager._prepare_full_image()
             BackgroundManager._refresh_all()
-        # 强制页面中所有控件重绘
+        # 强制所有页面 Canvas 文本内容重绘
+        self.update_idletasks()
         for page in self._pages.values():
             if page.winfo_ismapped():
                 BackgroundManager._force_draw(page)
+        # Canvas 自绘组件统一刷新主题（bg + 文本颜色）
+        if hasattr(self, '_file_browser') and self._file_browser.winfo_exists():
+            self._file_browser._file_list.refresh_theme()
+            if self._file_browser._mode == "dual":
+                self._file_browser._local_list.refresh_theme()
+        if hasattr(self, '_terminal_page') and self._terminal_page.winfo_exists():
+            for tab in self._terminal_page._tabs:
+                try:
+                    tab._output.refresh_theme()
+                except Exception:
+                    pass
 
     # ============================================================
     #  连接管理
