@@ -937,6 +937,9 @@ class FileBrowser(ctk.CTkFrame):
             self._btn_to_local.pack(side="left", padx=2)
             self._btn_to_remote.pack(side="left", padx=2)
             self._local_navigate(self._local_path)
+            # 强制 layout → 两栏各得 50% 宽度 → 重绘
+            self._list_container.update_idletasks()
+            self._file_list._redraw()
         else:
             self._mode = "single"
             self._btn_mode.configure(text="📂 双栏", fg_color="#1E3A5A", hover_color="#2A4A6A")
@@ -944,6 +947,9 @@ class FileBrowser(ctk.CTkFrame):
             self._btn_to_local.pack_forget()
             self._btn_to_remote.pack_forget()
             self._list_container.grid_columnconfigure(1, weight=0)
+            # 强制 layout → 让远程列表扩展填满 → 重绘
+            self._list_container.update_idletasks()
+            self._file_list._redraw()
 
     # ===== 本地文件事件 =====
 
