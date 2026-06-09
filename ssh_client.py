@@ -568,8 +568,7 @@ class SSHClient:
     def get_sidebar_stats(self) -> dict:
         """获取侧边栏精简状态（1 次 SSH 往返）。"""
         script = (
-            # ★ 侧栏从 /proc/stat 即时读取(零开销,不受top自身CPU影响)
-            "echo CPU_PCT:$(grep 'cpu ' /proc/stat | awk '{u=$2+$4;t=$2+$4+$5;printf \"%.1f\",u*100/t}');"
+            "echo CPU_PCT:$(top -bn2 -d 0.3 | grep '%Cpu' | tail -1 | sed 's/,/ /g' | awk '{p=0;for(i=1;i<=NF;i++){if($i~/^id$/){print 100-p;exit};p=$i}}');"
             "echo MEM:$(free -m | grep Mem | awk '{print $2,$3}');"
             "echo IP:$(hostname -I 2>/dev/null | awk '{print $1}');"
             "echo TEMP:$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0)"
