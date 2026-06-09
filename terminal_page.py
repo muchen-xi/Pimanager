@@ -152,12 +152,15 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         Args:
             delayed: True 时使用 after_idle 延迟合并多次调用
         """
-        # ★ 防抖：多次快速调用合并为一次 idle 时执行
         if delayed:
             if self._redraw_after_id:
                 return
             self._redraw_after_id = self.after_idle(self._do_redraw)
             return
+        # 直接重绘前取消待处理的 idle 回调，避免重复绘制
+        if self._redraw_after_id:
+            self.after_cancel(self._redraw_after_id)
+            self._redraw_after_id = None
         self._do_redraw()
 
     def _do_redraw(self):
@@ -311,10 +314,12 @@ class CanvasTerminalOutput(ctk.CTkFrame):
             self._scroll(-lines if lines != 0 else (-1 if event.delta > 0 else 1))
 
     def _on_resize(self, event=None):
-        """容器大小变化时重绘（带防抖）。"""
+        """容器大小变化时重绘（防抖80ms，避免瞬间几十次Configure卡死UI）。"""
         if event and event.widget is not self:
             return  # 忽略子 widget 的 Configure 事件
-        self._redraw(delayed=True)
+        if hasattr(self, '_resize_after'):
+            self.after_cancel(self._resize_after)
+        self._resize_after = self.after(80, self._redraw)
 
     # ===== 滚动条 =====
 

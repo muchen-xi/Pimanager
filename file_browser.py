@@ -252,9 +252,12 @@ class _CanvasListBase(ctk.CTkFrame):
         self._redraw()
 
     def _on_resize(self, event=None):
+        """窗口尺寸变化时防抖重绘（避免瞬间几十次 Configure 事件卡死 UI）。"""
         if event and event.widget is not self:
             return
-        self._redraw()
+        if hasattr(self, '_resize_after'):
+            self.after_cancel(self._resize_after)
+        self._resize_after = self.after(80, self._redraw)
 
     # ===== 滚动 =====
 
