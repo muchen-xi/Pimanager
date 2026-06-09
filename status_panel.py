@@ -175,17 +175,26 @@ class StatusPanel(ctk.CTkFrame):
         self._lbl_last_update.configure(text=f"最后更新: {ts}")
 
         # 进度条颜色
-        self._set_bar_colors(mem_pct, disk_pct)
+        self._set_bar_colors(cpu, mem_pct, disk_pct)
 
-    def _set_bar_colors(self, mem_pct, disk_pct):
+    def _set_bar_colors(self, cpu_pct=None, mem_pct=None, disk_pct=None):
         """根据使用率设置进度条颜色"""
-        for bar, pct in [(self._mem_bar, mem_pct), (self._disk_bar, disk_pct)]:
-            if pct >= 90:
-                bar.configure(progress_color="#FF4444")
-            elif pct >= 70:
-                bar.configure(progress_color="#FFB347")
-            else:
-                bar.configure(progress_color="#4CAF50")
+        if cpu_pct is not None:
+            for bar, pct in [(self._cpu_bar, cpu_pct)]:
+                if pct >= 90:
+                    bar.configure(progress_color="#FF4444")
+                elif pct >= 70:
+                    bar.configure(progress_color="#FFB347")
+                else:
+                    bar.configure(progress_color="#4CAF50")
+        if mem_pct is not None:
+            for bar, pct in [(self._mem_bar, mem_pct), (self._disk_bar, disk_pct)]:
+                if pct >= 90:
+                    bar.configure(progress_color="#FF4444")
+                elif pct >= 70:
+                    bar.configure(progress_color="#FFB347")
+                else:
+                    bar.configure(progress_color="#4CAF50")
 
     def _show_disconnected(self):
         """显示未连接状态"""
@@ -193,11 +202,14 @@ class StatusPanel(ctk.CTkFrame):
         self._lbl_os.configure(text="请先连接到树莓派")
         self._lbl_kernel.configure(text="")
         self._cpu_bar.set(0)
+        self._cpu_bar.configure(progress_color="#4CAF50")  # 重置颜色
         self._cpu_pct.configure(text="--%")
         self._temp_label.configure(text="--°C", text_color="gray")
         self._mem_bar.set(0)
+        self._mem_bar.configure(progress_color="#4CAF50")
         self._mem_text.configure(text="-- / -- MB")
         self._disk_bar.set(0)
+        self._disk_bar.configure(progress_color="#4CAF50")
         self._disk_text.configure(text="-- / -- MB")
         self._lbl_uptime.configure(text="⏱ 运行时间: --")
         self._lbl_load.configure(text="📊 负载: --")

@@ -1,7 +1,7 @@
 """
 PiManager - 轻量级树莓派管理工具
 """
-__version__ = "1.1.0"
+__version__ = "1.3.3"
 
 from .app import PiManagerApp, BackgroundManager
 from .ssh_client import SSHClient
