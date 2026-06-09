@@ -9,6 +9,7 @@ import os
 import tkinter as tk
 from collections import deque
 from typing import Optional
+from .theme import ThemeColors
 
 
 # ===== 快捷命令预设 =====
@@ -45,17 +46,22 @@ class CanvasTerminalOutput(ctk.CTkFrame):
 
         # 内部 tk.Canvas — 背景由 _apply_bg_fragment 绘制
         self._canvas = tk.Canvas(
-            self, highlightthickness=0, bd=0, bg="#0D1117",
+            self, highlightthickness=0, bd=0,
+            bg=ThemeColors.get("canvas_bg"),
             selectborderwidth=0, insertwidth=0)
         self._canvas.grid(row=0, column=0, sticky="nsew")
 
         # 文本行缓冲区
         self._lines: list[str] = []
         self._text_ids: list[int] = []
-        self._line_height = 18
+        self._base_line_height = 18
         self._pad_x = 12
         self._pad_y = 8
         self._visible_start = 0
+
+    @property
+    def _line_height(self) -> int:
+        return int(self._base_line_height * ThemeColors.get_font_scale())
 
         # ★ 自动滚动标志：True=新输出自动追底，False=用户正在查看历史
         self._auto_scroll = True
@@ -63,9 +69,9 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         # ★ 防抖：延迟重绘 ID
         self._redraw_after_id = None
 
-        # 字体颜色
-        self._text_color = "#C9D1D9"
-        self._err_color = "#FF6B6B"
+        # 字体颜色（跟随主题）
+        self._text_color = ThemeColors.get("canvas_text")
+        self._err_color = ThemeColors.get("canvas_err")
 
         # ===== 滚轮事件绑定 =====
         # ★ 关键修复：Windows 下 <MouseWheel> 只发给有焦点的 widget
@@ -156,15 +162,18 @@ class CanvasTerminalOutput(ctk.CTkFrame):
             self._canvas.delete("scrollbar")
             return
 
+        # ★ 确保布局完成再测量尺寸
+        self.update_idletasks()
         cw = self._canvas.winfo_width()
-        if cw < 20:
-            cw = 600
+        ch = self._canvas.winfo_height()
+        if cw < 20 or ch < 20:
+            # 尺寸无效，延迟重试
+            if not self._redraw_after_id:
+                self._redraw_after_id = self.after(100, self._do_redraw)
+            return
 
         # 背景片段 — 在第一次绘制时应用
         self._apply_bg_fragment()
-
-        # 计算可见范围
-        ch = self._canvas.winfo_height()
         max_visible = max(1, (ch - self._pad_y * 2) // self._line_height)
 
         total = len(self._lines)
@@ -187,7 +196,7 @@ class CanvasTerminalOutput(ctk.CTkFrame):
                 tid = self._canvas.create_text(
                     self._pad_x, y, anchor="nw",
                     text=display, fill=color,
-                    font=("Consolas", 11), tags="text")
+                    font=ThemeColors.scaled_font("Consolas", 11), tags="text")
                 self._text_ids.append(tid)
             y += self._line_height
 
@@ -308,11 +317,13 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         # 滚动条轨道
         self._canvas.create_rectangle(
             bar_x - 1, 0, bar_x + bar_w + 1, ch,
-            fill="#1A1A1A", outline="", tags=("scrollbar", "scrollbar_track"))
+            fill=ThemeColors.get("scrollbar_track"), outline="",
+            tags=("scrollbar", "scrollbar_track"))
         # 滚动条滑块
         self._canvas.create_rectangle(
             bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
-            fill="#555555", outline="", tags=("scrollbar", "scrollbar_thumb"))
+            fill=ThemeColors.get("scrollbar"), outline="",
+            tags=("scrollbar", "scrollbar_thumb"))
 
     def _on_scrollbar_click(self, event):
         """点击滚动条轨道 → 跳转到对应位置。"""
@@ -452,7 +463,7 @@ class TerminalTab:
             input_frame,
             text="pi@zero:~$",
             font=ctk.CTkFont(family="Consolas", size=13),
-            text_color="#4CAF50",
+            text_color=ThemeColors.get("terminal_prompt"),
         ).grid(row=0, column=0, padx=(10, 4), pady=6)
 
         # 输入框
@@ -728,8 +739,8 @@ class TerminalPage(ctk.CTkFrame):
                     width=80,
                     height=28,
                     font=ctk.CTkFont(size=11),
-                    fg_color="#1E3A1E",
-                    hover_color="#2A4A2A",
+                    fg_color=ThemeColors.get("canvas_quick_btn"),
+                    hover_color=ThemeColors.get("canvas_quick_btn_hover"),
                     command=lambda c=cmd: self._run_quick_cmd(c),
                 )
                 btn.pack(side="left", padx=3, pady=3)
