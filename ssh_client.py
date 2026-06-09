@@ -495,6 +495,18 @@ class SSHClient:
 
     # ========== 系统状态 ==========
 
+    @staticmethod
+    def _parse_kv_lines(text: str) -> list[tuple[str, str]]:
+        """解析 KEY:VALUE 行输出，返回 [(key, value), ...] 列表。"""
+        pairs = []
+        for line in text.strip().split("\n"):
+            line = line.strip()
+            if ":" not in line:
+                continue
+            key, _, val = line.partition(":")
+            pairs.append((key.strip(), val.strip()))
+        return pairs
+
     def get_system_status(self) -> dict:
         """获取树莓派系统状态（合并为 1 次 SSH 往返，大幅优化响应时间）。"""
         status = {
@@ -522,12 +534,7 @@ class SSHClient:
         if code != 0 or not out.strip():
             return status
 
-        for line in out.strip().split("\n"):
-            line = line.strip()
-            if ":" not in line:
-                continue
-            key, _, val = line.partition(":")
-            val = val.strip()
+        for key, val in self._parse_kv_lines(out):
             try:
                 if key == "CPU_TEMP":
                     status["cpu_temp"] = float(val) / 1000.0
@@ -573,12 +580,7 @@ class SSHClient:
         if code != 0 or not out.strip():
             return result
 
-        for line in out.strip().split("\n"):
-            line = line.strip()
-            if ":" not in line:
-                continue
-            key, _, val = line.partition(":")
-            val = val.strip()
+        for key, val in self._parse_kv_lines(out):
             try:
                 if key == "CPU_PCT":
                     result["cpu"] = float(val)

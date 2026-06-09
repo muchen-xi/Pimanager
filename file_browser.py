@@ -4,6 +4,7 @@ PiManager 文件浏览器 - 远程文件管理（浏览/上传/下载/删除/重
 import customtkinter as ctk
 import threading
 import os
+import shlex
 import datetime
 import tkinter as tk
 from pathlib import Path
@@ -141,7 +142,7 @@ class _CanvasListBase(ctk.CTkFrame):
         # 列宽
         col_size = 90
         col_time = 160
-        col_name = cw - col_size - col_time - self._pad_x * 4
+        col_name = max(120, cw - col_size - col_time - self._pad_x * 4)
 
         total = len(self._items)
         total_h = total * self._row_height
@@ -659,14 +660,15 @@ class FileBrowser(ctk.CTkFrame):
 
         remote_path = f"{self._current_path}/{self._selected_file}"
 
-        # 根据扩展名确定执行方式
+        # 根据扩展名确定执行方式（shlex.quote 防注入）
+        rp = shlex.quote(remote_path)
         ext = os.path.splitext(self._selected_file)[1].lower()
         if ext in (".py", ".py3"):
-            run_cmd = f"python3 '{remote_path}'"
+            run_cmd = f"python3 {rp}"
         elif ext in (".sh", ".bash"):
-            run_cmd = f"bash '{remote_path}'"
+            run_cmd = f"bash {rp}"
         else:
-            run_cmd = f"chmod +x '{remote_path}' && '{remote_path}'"
+            run_cmd = f"chmod +x {rp} && {rp}"
 
         # 切换到终端页面并执行
         if self._app and hasattr(self._app, '_terminal_page'):

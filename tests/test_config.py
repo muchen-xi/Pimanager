@@ -101,6 +101,32 @@ class TestValidateConfig(unittest.TestCase):
         self.assertTrue(any("主机地址" in e for e in errors))
 
 
+class TestConfigMigration(unittest.TestCase):
+    """测试 _migrate_and_merge 逻辑"""
+
+    def test_merge_preserves_new_defaults(self):
+        """合并应确保新默认字段被添加。"""
+        from config import _migrate_and_merge
+        old = {"version": 1, "connections": [{"host": "test", "port": 22}]}
+        merged = _migrate_and_merge(old)
+        # behavior 是 V2 新增的
+        self.assertIn("behavior", merged)
+        self.assertIn("terminal_history_size", merged["behavior"])
+        # 原有值保留
+        self.assertEqual(merged["connections"][0]["host"], "test")
+        # 版本升级
+        self.assertEqual(merged["version"], 2)
+
+    def test_merge_overrides_none_with_default(self):
+        """用户值覆盖默认值，缺失字段用默认值补全。"""
+        from config import _migrate_and_merge
+        old = {"version": 2, "appearance": {"theme": "light"}}
+        merged = _migrate_and_merge(old)
+        self.assertEqual(merged["appearance"]["theme"], "light")
+        # 未设置的字段用默认值
+        self.assertIn("font_scale", merged["appearance"])
+
+
 class TestConfigBackup(unittest.TestCase):
     """测试配置备份和恢复"""
 

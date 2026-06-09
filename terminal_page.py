@@ -547,7 +547,7 @@ class TerminalTab:
         self._session.add_history(cmd)
 
         if cmd.lower() in ("clear", "cls"):
-            self._output.delete("1.0", "end")
+            self._output.delete("1.0", "end")  # CanvasTerminalOutput ignores args
             return
 
         if not self._ssh.connected:
@@ -713,42 +713,26 @@ class TerminalPage(ctk.CTkFrame):
     # ===== 快捷命令栏 =====
 
     def _build_quick_bar(self):
-        """快捷命令按钮栏"""
+        """快捷命令按钮栏（每行最多 5 个，动态分行）"""
         quick_card = self._make_card("⚡ 快捷命令", 0)
 
-        # 前 5 个快捷命令用大按钮
-        row_frame = ctk.CTkFrame(quick_card, fg_color="transparent", corner_radius=0)
-        row_frame.pack(fill="x", padx=0, pady=2)
+        cmds_per_row = 5
+        for i in range(0, len(QUICK_COMMANDS), cmds_per_row):
+            row_frame = ctk.CTkFrame(quick_card, fg_color="transparent", corner_radius=0)
+            row_frame.pack(fill="x", padx=0, pady=2)
 
-        for text, cmd in QUICK_COMMANDS[:5]:
-            btn = ctk.CTkButton(
-                row_frame,
-                text=text,
-                width=80,
-                height=28,
-                font=ctk.CTkFont(size=11),
-                fg_color="#1E3A1E",
-                hover_color="#2A4A2A",
-                command=lambda c=cmd: self._run_quick_cmd(c),
-            )
-            btn.pack(side="left", padx=3, pady=3)
-
-        # 后 5 个快捷命令
-        row_frame2 = ctk.CTkFrame(quick_card, fg_color="transparent", corner_radius=0)
-        row_frame2.pack(fill="x", padx=0, pady=2)
-
-        for text, cmd in QUICK_COMMANDS[5:]:
-            btn = ctk.CTkButton(
-                row_frame2,
-                text=text,
-                width=80,
-                height=28,
-                font=ctk.CTkFont(size=11),
-                fg_color="#1E3A1E",
-                hover_color="#2A4A2A",
-                command=lambda c=cmd: self._run_quick_cmd(c),
-            )
-            btn.pack(side="left", padx=3, pady=3)
+            for text, cmd in QUICK_COMMANDS[i:i + cmds_per_row]:
+                btn = ctk.CTkButton(
+                    row_frame,
+                    text=text,
+                    width=80,
+                    height=28,
+                    font=ctk.CTkFont(size=11),
+                    fg_color="#1E3A1E",
+                    hover_color="#2A4A2A",
+                    command=lambda c=cmd: self._run_quick_cmd(c),
+                )
+                btn.pack(side="left", padx=3, pady=3)
 
     def _run_quick_cmd(self, cmd: str):
         """在当前活跃标签执行快捷命令"""

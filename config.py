@@ -61,33 +61,34 @@ def _migrate_v1_to_v2(config: dict) -> dict:
 _MIGRATIONS[1] = _migrate_v1_to_v2
 
 
+def _migrate_and_merge(config: dict) -> dict:
+    """对配置执行版本迁移 + 默认值合并，返回新字典。"""
+    loaded_version = config.get("version", 1)
+    while loaded_version < CONFIG_VERSION:
+        migrator = _MIGRATIONS.get(loaded_version)
+        if migrator:
+            config = migrator(config)
+            logger.info(f"配置已迁移: v{loaded_version} → v{loaded_version + 1}")
+        loaded_version += 1
+    merged = DEFAULT_CONFIG.copy()
+    _deep_merge(merged, config)
+    merged["version"] = CONFIG_VERSION
+    return merged
+
+
 def load_config() -> dict:
     """加载配置（自动迁移旧版本）。"""
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
-
-            # ★ 版本迁移
-            loaded_version = config.get("version", 1)
-            while loaded_version < CONFIG_VERSION:
-                migrator = _MIGRATIONS.get(loaded_version)
-                if migrator:
-                    config = migrator(config)
-                    logger.info(f"配置已迁移: v{loaded_version} → v{loaded_version + 1}")
-                loaded_version += 1
-
-            # 合并默认值（确保新字段有默认值）
-            merged = DEFAULT_CONFIG.copy()
-            _deep_merge(merged, config)
-            merged["version"] = CONFIG_VERSION
-            return merged
+            return _migrate_and_merge(config)
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"配置文件损坏: {e}，尝试恢复备份")
             # ★ 尝试从备份恢复
             restored = _try_restore_backup()
             if restored:
-                return restored
+                return _migrate_and_merge(restored)
             logger.warning("无可用备份，使用默认配置")
             return DEFAULT_CONFIG.copy()
     return DEFAULT_CONFIG.copy()

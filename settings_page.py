@@ -81,7 +81,7 @@ class SettingsPage(ctk.CTkFrame):
             number_of_steps=7,
             variable=scale_var,
             width=180,
-            command=lambda v: ctk.set_widget_scaling(float(v)),
+            command=lambda v: (ctk.set_widget_scaling(float(v)), self._update_scale_label()),
         ).pack(side="left", padx=(0, 8))
         self._scale_label = ctk.CTkLabel(scale_frame, text=f"{scale_var.get():.1f}x", width=35)
         self._scale_label.pack(side="left")
@@ -184,6 +184,7 @@ class SettingsPage(ctk.CTkFrame):
             number_of_steps=29,
             variable=refresh_var,
             width=180,
+            command=lambda v: self._update_refresh_label(),
         ).pack(side="left", padx=(0, 8))
         self._refresh_label = ctk.CTkLabel(refresh_frame, text=f"{refresh_var.get()}秒", width=35)
         self._refresh_label.pack(side="left")
@@ -207,7 +208,7 @@ class SettingsPage(ctk.CTkFrame):
         card.grid_columnconfigure(0, weight=1)
 
         info = (
-            "PiManager v1.1.0\n"
+            "PiManager v1.3.3\n"
             "轻量级树莓派 Zero W 桌面管理器\n"
             "Python + CustomTkinter + Paramiko\n"
             "支持多标签命令终端 · 密钥认证 · 自定义背景"
@@ -305,8 +306,16 @@ class SettingsPage(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("保存失败", str(e))
 
-    def update_labels(self):
-        """更新滑块对应的标签文本"""
+    def _update_scale_label(self):
+        """实时更新字体缩放标签"""
         self._scale_label.configure(text=f"{self._scale_var.get():.1f}x")
-        self._opacity_label.configure(text=f"{int(self._opacity_var.get()*100)}%")
+
+    def _update_refresh_label(self):
+        """实时更新刷新间隔标签"""
         self._refresh_label.configure(text=f"{self._refresh_var.get()}秒")
+
+    def update_labels(self):
+        """更新所有滑块对应的标签文本（供外部调用）。"""
+        self._update_scale_label()
+        self._opacity_label.configure(text=f"{int(self._opacity_var.get()*100)}%")
+        self._update_refresh_label()

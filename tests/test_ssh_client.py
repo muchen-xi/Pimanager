@@ -164,6 +164,31 @@ class TestReconnectLogic(unittest.TestCase):
         self.assertIn("无可用连接参数", msg)
 
 
+class TestParseKvLines(unittest.TestCase):
+    """测试 SSH 输出 KEY:VALUE 解析器"""
+
+    def test_parse_simple(self):
+        pairs = SSHClient._parse_kv_lines("CPU:50\nMEM:100")
+        self.assertEqual(pairs, [("CPU", "50"), ("MEM", "100")])
+
+    def test_parse_with_spaces(self):
+        pairs = SSHClient._parse_kv_lines("  CPU  :  25.5  \n  TEMP : 42.1  ")
+        self.assertEqual(pairs, [("CPU", "25.5"), ("TEMP", "42.1")])
+
+    def test_parse_empty(self):
+        pairs = SSHClient._parse_kv_lines("")
+        self.assertEqual(pairs, [])
+
+    def test_parse_skip_malformed(self):
+        pairs = SSHClient._parse_kv_lines("garbage\nKEY:value\nno_colon\nOTHER:42")
+        self.assertEqual(pairs, [("KEY", "value"), ("OTHER", "42")])
+
+    def test_parse_multiline_value(self):
+        """值中不应有换行符。"""
+        pairs = SSHClient._parse_kv_lines("A:1\nB:2\nC:3")
+        self.assertEqual(len(pairs), 3)
+
+
 class TestExecCommandBatch(unittest.TestCase):
     """测试批量命令执行"""
 
