@@ -16,4 +16,11 @@ Thumbs.db
 
 # 备份
 *.bak
+*.bak2
 *.tmp
+
+# 日志
+*.log
+
+# 打包输出
+dist/

@@ -4,6 +4,7 @@ PiManager 主应用窗口
 import customtkinter as ctk
 import threading
 import os
+import logging
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
@@ -14,6 +15,90 @@ from .status_panel import StatusPanel
 from .file_browser import FileBrowser
 from .terminal_page import TerminalPage
 from .settings_page import SettingsPage
+
+
+# ============================================================
+#  ThemeColors — 统一颜色令牌系统
+#  集中管理所有颜色，支持深色/浅色两套主题。
+#  使用：ThemeColors.get("accent") → 自动适配当前主题
+# ============================================================
+class ThemeColors:
+    """统一颜色令牌 — 深色/浅色自动切换"""
+
+    _dark = {
+        "bg": "#0D1117",
+        "bg_card": "#161B22",
+        "text": "#C9D1D9",
+        "text_secondary": "#8B949E",
+        "accent": "#4CAF50",
+        "accent_hover": "#3A7A3A",
+        "accent_dim": "#2B5B2B",
+        "danger": "#8B0000",
+        "danger_hover": "#A00000",
+        "warning": "#FFB347",
+        "warning_strong": "#FF4444",
+        "card_border": ("gray55", "gray35"),
+        "btn_primary": "#2B5B2B",
+        "btn_primary_hover": "#3A7A3A",
+        "btn_transparent_hover": "#333333",
+        "separator": ("gray70", "gray30"),
+        "input_placeholder": "#555555",
+        "scrollbar": "#555555",
+        "nav_active": ("gray80", "gray28"),
+        "dual_btn": "#1E3A5A",
+        "dual_btn_hover": "#2A4A6A",
+        "terminal_prompt": "#4CAF50",
+        "status_ok": "#4CAF50",
+        "local_file_name": "#8BCCFF",
+    }
+
+    _light = {
+        "bg": "#FFFFFF",
+        "bg_card": "#F6F8FA",
+        "text": "#24292F",
+        "text_secondary": "#656D76",
+        "accent": "#2DA44E",
+        "accent_hover": "#2C974B",
+        "accent_dim": "#DCF5E4",
+        "danger": "#CF222E",
+        "danger_hover": "#A40E26",
+        "warning": "#D4A72C",
+        "warning_strong": "#CF222E",
+        "card_border": ("gray55", "gray35"),
+        "btn_primary": "#2DA44E",
+        "btn_primary_hover": "#2C974B",
+        "btn_transparent_hover": "#E8E8E8",
+        "separator": ("gray70", "gray30"),
+        "input_placeholder": "#999999",
+        "scrollbar": "#CCCCCC",
+        "nav_active": ("gray75", "gray28"),
+        "dual_btn": "#DDF4FF",
+        "dual_btn_hover": "#C6ECFF",
+        "terminal_prompt": "#2DA44E",
+        "status_ok": "#2DA44E",
+        "local_file_name": "#0969DA",
+    }
+
+    @classmethod
+    def _current(cls) -> dict:
+        """获取当前主题的颜色映射。"""
+        try:
+            mode = ctk.get_appearance_mode()
+        except Exception:
+            mode = "Dark"
+        return cls._dark if mode == "Dark" else cls._light
+
+    @classmethod
+    def get(cls, key: str):
+        """获取颜色值。支持 "fg_color, hover_color" 返回两个值的联合键。"""
+        return cls._current().get(key, "#000000")
+
+    @classmethod
+    def fg_hover(cls, key: str) -> tuple:
+        """获取 fg_color 和 hover_color 对。"""
+        colors = cls._current()
+        return (colors.get(key, "#000000"),
+                colors.get(f"{key}_hover", "#222222"))
 
 
 # ============================================================
@@ -44,7 +129,8 @@ class BackgroundManager:
     _enabled: bool = False
     _original_draws: dict = {}
     _excluded_widgets: set = set()
-    _processed_canvases: dict = {}  # canvas id → (width, height) 缓存，跳过已处理的尺寸
+    _processed_canvases: dict = {}  # canvas id → (width, height) 缓存
+    _blended_cache: dict = {}  # ★ (bg_path, opacity, size) → PIL Image 缓存
 
     # ========== 公开 API ==========
 
@@ -80,14 +166,21 @@ class BackgroundManager:
         cls._refs.clear()
         if path and os.path.exists(path):
             try:
+                # ★ 验证图片文件是否可正常打开
                 cls._bg_pil = Image.open(path)
+                cls._bg_pil.verify()  # 验证图片完整性
+                cls._bg_pil = Image.open(path)  # verify 后需要重新打开
                 cls._enabled = True
                 cls._processed_canvases.clear()
+                cls._blended_cache.clear()  # ★ 清除混合缓存
                 cls._prepare_full_image()
                 cls._refresh_all()
-            except Exception:
+            except Exception as e:
                 cls._enabled = False
                 cls._bg_pil = None
+                logging.warning(f"无法加载背景图片 {path}: {e}")
+                messagebox.showwarning("背景加载失败",
+                    f"无法加载图片文件，文件可能已损坏。\n{os.path.basename(path)}\n错误: {e}")
         else:
             cls._bg_pil = None
             cls._bg_tk_full = None
@@ -101,6 +194,7 @@ class BackgroundManager:
         cls._bg_tk_full = None
         cls._enabled = False
         cls._refs.clear()
+        cls._blended_cache.clear()
         if cls._content_frame:
             cls._clear_all(cls._content_frame)
             cls._refresh_all()
@@ -110,7 +204,10 @@ class BackgroundManager:
         """窗口大小改变后重新缩放并重绘背景。"""
         if cls._enabled and cls._bg_pil:
             cls._processed_canvases.clear()
+            cls._blended_cache.clear()
             cls._prepare_full_image()
+            # ★ 延迟清理尺寸缓存，避免频繁重复绘制
+            cls._content_frame.after(100, lambda: cls._processed_canvases.clear())
             cls._refresh_all()
 
     @classmethod
@@ -152,10 +249,12 @@ class BackgroundManager:
                 return
             cls._processed_canvases[cid] = (pw, ph)
 
-            # 清除所有可能的不透明背景标签
+            # ★ 优化：只清除实际存在的 tag
             for tag in ("inner_parts", "bg_parts", "background_parts", "background", "bg"):
                 try:
-                    canvas.itemconfig(tag, fill="", outline="")
+                    # 检查 tag 是否存在再操作
+                    if canvas.find_withtag(tag):
+                        canvas.itemconfig(tag, fill="", outline="")
                 except Exception:
                     pass
             canvas.delete("background_parts")
@@ -216,10 +315,20 @@ class BackgroundManager:
         ch = cls._content_frame.winfo_height()
         if cw < 50 or ch < 50:
             cw, ch = 900, 660
+
+        # ★ 缓存混合结果：相同 (路径, 透明度, 尺寸) 不重复混合
+        cache_key = (cls._bg_path, cls._bg_opacity, cw, ch)
+        cached = cls._blended_cache.get(cache_key)
+        if cached is not None:
+            cls._bg_pil_blended = cached
+            cls._bg_tk_full = ImageTk.PhotoImage(cached)
+            return
+
         bg = cls._bg_pil.resize((cw, ch), Image.LANCZOS).convert("RGBA")
         dark = Image.new("RGBA", (cw, ch), (13, 17, 23, 255))
         blended = Image.blend(dark.convert("RGB"), bg.convert("RGB"), cls._bg_opacity)
         cls._bg_pil_blended = blended
+        cls._blended_cache[cache_key] = blended  # ★ 缓存
         cls._bg_tk_full = ImageTk.PhotoImage(blended)
 
     @classmethod
@@ -313,16 +422,49 @@ class BackgroundManager:
                 cls._clear_all(child)
 
 
+# ============================================================
+#  统一卡片工厂函数
+# ============================================================
+
+def make_card(master, title: str = "", row: int = 0, column: int = 0,
+              sticky: str = "ew", columnspan: int = 1, **grid_kw) -> ctk.CTkFrame:
+    """创建统一的卡片容器 — 透明背景 + 细边框，背景图穿透。
+
+    Returns:
+        CTkFrame: 卡片容器（已 grid 到 master）
+    """
+    frame = ctk.CTkFrame(
+        master, fg_color="transparent", border_width=1,
+        border_color=ThemeColors.get("card_border"), corner_radius=8)
+    frame.grid(row=row, column=column, columnspan=columnspan,
+               sticky=sticky, **grid_kw)
+    if title:
+        ctk.CTkLabel(
+            frame, text=title,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            anchor="w",
+        ).pack(anchor="w", padx=10, pady=(6, 2))
+    return frame
+
+
+# ============================================================
+#  PiManagerApp — 主应用窗口
+# ============================================================
+
 class PiManagerApp(ctk.CTk):
     """PiManager 主应用"""
 
     def __init__(self):
         super().__init__()
 
+        # 初始化日志
+        self._setup_logging()
+
         # 初始化
         self._config = load_config()
         self._ssh = SSHClient()
         self._resize_after_id = None
+        self._connect_time = None  # ★ 连接时间
 
         # 窗口设置
         self.title("PiManager - 树莓派管理器")
@@ -366,17 +508,7 @@ class PiManagerApp(ctk.CTk):
         self._build_pages()
 
         # ===== 状态栏 =====
-        self._status_bar = ctk.CTkFrame(self, height=28, corner_radius=0)
-        self._status_bar.grid(row=1, column=1, sticky="ew")
-        self._status_bar.grid_columnconfigure(1, weight=1)
-        self._status_label = ctk.CTkLabel(
-            self._status_bar, text="就绪", anchor="w",
-            font=ctk.CTkFont(size=11))
-        self._status_label.grid(row=0, column=0, padx=10, sticky="w")
-        self._status_right = ctk.CTkLabel(
-            self._status_bar, text="", anchor="e",
-            font=ctk.CTkFont(size=11), text_color="gray")
-        self._status_right.grid(row=0, column=1, padx=10, sticky="e")
+        self._build_status_bar()
 
         # 显示首页
         self._show_page("status")
@@ -384,6 +516,21 @@ class PiManagerApp(ctk.CTk):
         # 自动连接
         if self._config.get("behavior", {}).get("auto_connect", False):
             self.after(500, self._auto_connect)
+
+        # ★ 启动状态栏时钟
+        self._update_status_clock()
+
+    def _setup_logging(self):
+        """配置日志系统。"""
+        log_path = Path(__file__).parent / "pimanager.log"
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+            handlers=[
+                logging.FileHandler(str(log_path), encoding='utf-8'),
+                logging.StreamHandler()
+            ]
+        )
 
     # ============================================================
     #  侧边栏
@@ -517,7 +664,7 @@ class PiManagerApp(ctk.CTk):
         self._btn_shutdown.pack(side="right", fill="x", expand=True, padx=(2, 0))
 
         # ---- Row 12: 版本 ----
-        ctk.CTkLabel(sidebar, text="v1.2.0", text_color="gray",
+        ctk.CTkLabel(sidebar, text="v1.3.3", text_color="gray",
                      font=ctk.CTkFont(size=10)).grid(
             row=12, column=0, pady=(6, 10))
 
@@ -525,12 +672,59 @@ class PiManagerApp(ctk.CTk):
         sidebar.grid_rowconfigure(13, weight=1)
 
     def _highlight_nav(self, page_id: str):
-        """高亮当前导航按钮"""
+        """高亮当前导航按钮 — 使用主题颜色"""
         for pid, btn in self._nav_buttons.items():
             if pid == page_id:
-                btn.configure(fg_color=("gray80", "gray28"))
+                btn.configure(fg_color=ThemeColors.get("nav_active"))
             else:
                 btn.configure(fg_color="transparent")
+
+    # ============================================================
+    #  状态栏
+    # ============================================================
+
+    def _build_status_bar(self):
+        """构建增强状态栏 — 左侧状态 + 中间连接时长 + 右侧时钟"""
+        self._status_bar = ctk.CTkFrame(self, height=32, corner_radius=0)
+        self._status_bar.grid(row=1, column=1, sticky="ew")
+        self._status_bar.grid_columnconfigure(1, weight=1)
+
+        # 左侧：状态文字
+        self._status_label = ctk.CTkLabel(
+            self._status_bar, text="就绪", anchor="w",
+            font=ctk.CTkFont(size=11))
+        self._status_label.grid(row=0, column=0, padx=(10, 5), sticky="w")
+
+        # 中间：连接时长
+        self._status_duration = ctk.CTkLabel(
+            self._status_bar, text="", anchor="w",
+            font=ctk.CTkFont(size=10), text_color="gray")
+        self._status_duration.grid(row=0, column=1, padx=5, sticky="w")
+
+        # 右侧：时钟
+        self._status_clock = ctk.CTkLabel(
+            self._status_bar, text="", anchor="e",
+            font=ctk.CTkFont(size=11), text_color="gray")
+        self._status_clock.grid(row=0, column=2, padx=10, sticky="e")
+
+    def _update_status_clock(self):
+        """更新状态栏时钟（每分钟）。"""
+        import datetime
+        now = datetime.datetime.now()
+        self._status_clock.configure(text=now.strftime("%Y-%m-%d %H:%M"))
+
+        # 更新连接时长
+        if self._ssh.connected and self._connect_time:
+            delta = now - self._connect_time
+            hours, rem = divmod(int(delta.total_seconds()), 3600)
+            mins, secs = divmod(rem, 60)
+            if hours > 0:
+                dur_text = f"已连接 {hours}时{mins}分"
+            else:
+                dur_text = f"已连接 {mins}分{secs}秒"
+            self._status_duration.configure(text=dur_text)
+
+        self._status_clock_job = self.after(30000, self._update_status_clock)
 
     # ============================================================
     #  页面管理
@@ -588,7 +782,7 @@ class PiManagerApp(ctk.CTk):
     # ============================================================
 
     def _on_window_resize(self, event=None):
-        """窗口大小改变时更新背景（防抖 400ms）"""
+        """窗口大小改变时更新背景（防抖 250ms）。"""
         if not hasattr(self, '_content'):
             return
         cw = self._content.winfo_width()
@@ -601,7 +795,8 @@ class PiManagerApp(ctk.CTk):
         self._bg_last_size = (cw, ch)
         if hasattr(self, '_resize_after_id') and self._resize_after_id:
             self.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.after(150, lambda: BackgroundManager.refresh_size())
+        # ★ 防抖 250ms（从 150ms 增加）
+        self._resize_after_id = self.after(250, lambda: BackgroundManager.refresh_size())
 
     def _apply_background(self, force=False):
         """应用背景图片"""
@@ -661,7 +856,9 @@ class PiManagerApp(ctk.CTk):
 
     def _on_connect_result(self, ok: bool, msg: str):
         """连接结果回调"""
+        import datetime
         if ok:
+            self._connect_time = datetime.datetime.now()  # ★ 记录连接时间
             self._conn_indicator.configure(text="🟢 已连接")
             self._conn_host.configure(text=f"{self._ssh.host}")
             self._btn_connect.configure(text="🔌 断开", state="normal",
@@ -677,16 +874,21 @@ class PiManagerApp(ctk.CTk):
                 self._status_panel.start_auto_refresh()
             elif self._current_page == "files":
                 self._file_browser.refresh()
+            logging.info(f"已连接到 {self._ssh.host}")
         else:
+            self._connect_time = None
             self._conn_indicator.configure(text="🔴 连接失败")
             self._conn_host.configure(text=msg)
             self._btn_connect.configure(text="🔌 连接", state="normal",
                                         fg_color="#2B5B2B", hover_color="#3A7A3A")
             self._status_label.configure(text="连接失败")
+            logging.warning(f"连接失败: {msg}")
             messagebox.showerror("连接失败", msg)
 
     def _on_disconnected(self):
         """断开连接回调"""
+        self._connect_time = None
+        self._status_duration.configure(text="")
         self._conn_indicator.configure(text="🔴 未连接")
         self._conn_host.configure(text="")
         self._btn_connect.configure(text="🔌 连接", state="normal",
@@ -698,6 +900,7 @@ class PiManagerApp(ctk.CTk):
         self._stop_sidebar_refresh()
         if self._current_page == "status":
             self._status_panel.stop_auto_refresh()
+        logging.info("已断开连接")
 
     # ============================================================
     #  侧边栏系统状态刷新
@@ -746,7 +949,7 @@ class PiManagerApp(ctk.CTk):
         self._sidebar_temp.configure(text=f"{temp:.1f}°C", text_color=temp_color)
 
     def _start_sidebar_refresh(self):
-        """启动侧边栏自动刷新（每 5 秒）"""
+        """启动侧边栏自动刷新（每 3 秒）"""
         self._stop_sidebar_refresh()
         self._do_sidebar_refresh()
 
@@ -779,6 +982,7 @@ class PiManagerApp(ctk.CTk):
             self._ssh.exec_command("sudo shutdown -h now", timeout=5)
         threading.Thread(target=_do, daemon=True).start()
         self._status_label.configure(text="已发送关机命令")
+        logging.info("发送关机命令")
         messagebox.showinfo("已发送", "关机命令已发送，树莓派即将关闭")
 
     def _reboot_pi(self):
@@ -794,6 +998,7 @@ class PiManagerApp(ctk.CTk):
             self._ssh.exec_command("sudo shutdown -r now", timeout=5)
         threading.Thread(target=_do, daemon=True).start()
         self._status_label.configure(text="已发送重启命令")
+        logging.info("发送重启命令")
         messagebox.showinfo("已发送", "重启命令已发送，树莓派即将重启")
 
     def _show_conn_settings(self):
@@ -888,7 +1093,10 @@ class PiManagerApp(ctk.CTk):
     def _on_close(self):
         """关闭应用"""
         self._stop_sidebar_refresh()
+        if hasattr(self, '_status_clock_job'):
+            self.after_cancel(self._status_clock_job)
         if self._current_page == "status":
             self._status_panel.stop_auto_refresh()
         self._ssh.disconnect()
+        logging.info("应用关闭")
         self.destroy()
