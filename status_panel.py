@@ -4,6 +4,7 @@ PiManager 状态监控面板 - 树莓派实时系统状态
 import customtkinter as ctk
 import threading
 from typing import Optional
+from .theme import ThemeColors
 
 
 class StatusPanel(ctk.CTkFrame):
@@ -141,11 +142,11 @@ class StatusPanel(ctk.CTkFrame):
         # 温度
         temp = s.get("cpu_temp", 0)
         if temp >= 70:
-            temp_color = "#FF4444"
+            temp_color = ThemeColors.get("warning_strong")
         elif temp >= 50:
-            temp_color = "#FFB347"
+            temp_color = ThemeColors.get("warning")
         else:
-            temp_color = "#4CAF50"
+            temp_color = ThemeColors.get("status_ok")
         self._temp_label.configure(text=f"{temp:.1f}°C", text_color=temp_color)
 
         # 内存
@@ -179,37 +180,40 @@ class StatusPanel(ctk.CTkFrame):
 
     def _set_bar_colors(self, cpu_pct=None, mem_pct=None, disk_pct=None):
         """根据使用率设置进度条颜色"""
+        ok, warn, danger = (ThemeColors.get(k) for k in
+                            ("status_ok", "warning", "warning_strong"))
         if cpu_pct is not None:
             for bar, pct in [(self._cpu_bar, cpu_pct)]:
                 if pct >= 90:
-                    bar.configure(progress_color="#FF4444")
+                    bar.configure(progress_color=danger)
                 elif pct >= 70:
-                    bar.configure(progress_color="#FFB347")
+                    bar.configure(progress_color=warn)
                 else:
-                    bar.configure(progress_color="#4CAF50")
+                    bar.configure(progress_color=ok)
         if mem_pct is not None:
             for bar, pct in [(self._mem_bar, mem_pct), (self._disk_bar, disk_pct)]:
                 if pct >= 90:
-                    bar.configure(progress_color="#FF4444")
+                    bar.configure(progress_color=danger)
                 elif pct >= 70:
-                    bar.configure(progress_color="#FFB347")
+                    bar.configure(progress_color=warn)
                 else:
-                    bar.configure(progress_color="#4CAF50")
+                    bar.configure(progress_color=ok)
 
     def _show_disconnected(self):
         """显示未连接状态"""
+        ok_color = ThemeColors.get("status_ok")
         self._lbl_hostname.configure(text="🔴 未连接")
         self._lbl_os.configure(text="请先连接到树莓派")
         self._lbl_kernel.configure(text="")
         self._cpu_bar.set(0)
-        self._cpu_bar.configure(progress_color="#4CAF50")  # 重置颜色
+        self._cpu_bar.configure(progress_color=ok_color)  # 重置颜色
         self._cpu_pct.configure(text="--%")
         self._temp_label.configure(text="--°C", text_color="gray")
         self._mem_bar.set(0)
-        self._mem_bar.configure(progress_color="#4CAF50")
+        self._mem_bar.configure(progress_color=ok_color)
         self._mem_text.configure(text="-- / -- MB")
         self._disk_bar.set(0)
-        self._disk_bar.configure(progress_color="#4CAF50")
+        self._disk_bar.configure(progress_color=ok_color)
         self._disk_text.configure(text="-- / -- MB")
         self._lbl_uptime.configure(text="⏱ 运行时间: --")
         self._lbl_load.configure(text="📊 负载: --")

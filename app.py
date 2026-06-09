@@ -15,90 +15,7 @@ from .status_panel import StatusPanel
 from .file_browser import FileBrowser
 from .terminal_page import TerminalPage
 from .settings_page import SettingsPage
-
-
-# ============================================================
-#  ThemeColors — 统一颜色令牌系统
-#  集中管理所有颜色，支持深色/浅色两套主题。
-#  使用：ThemeColors.get("accent") → 自动适配当前主题
-# ============================================================
-class ThemeColors:
-    """统一颜色令牌 — 深色/浅色自动切换"""
-
-    _dark = {
-        "bg": "#0D1117",
-        "bg_card": "#161B22",
-        "text": "#C9D1D9",
-        "text_secondary": "#8B949E",
-        "accent": "#4CAF50",
-        "accent_hover": "#3A7A3A",
-        "accent_dim": "#2B5B2B",
-        "danger": "#8B0000",
-        "danger_hover": "#A00000",
-        "warning": "#FFB347",
-        "warning_strong": "#FF4444",
-        "card_border": ("gray55", "gray35"),
-        "btn_primary": "#2B5B2B",
-        "btn_primary_hover": "#3A7A3A",
-        "btn_transparent_hover": "#333333",
-        "separator": ("gray70", "gray30"),
-        "input_placeholder": "#555555",
-        "scrollbar": "#555555",
-        "nav_active": ("gray80", "gray28"),
-        "dual_btn": "#1E3A5A",
-        "dual_btn_hover": "#2A4A6A",
-        "terminal_prompt": "#4CAF50",
-        "status_ok": "#4CAF50",
-        "local_file_name": "#8BCCFF",
-    }
-
-    _light = {
-        "bg": "#FFFFFF",
-        "bg_card": "#F6F8FA",
-        "text": "#24292F",
-        "text_secondary": "#656D76",
-        "accent": "#2DA44E",
-        "accent_hover": "#2C974B",
-        "accent_dim": "#DCF5E4",
-        "danger": "#CF222E",
-        "danger_hover": "#A40E26",
-        "warning": "#D4A72C",
-        "warning_strong": "#CF222E",
-        "card_border": ("gray55", "gray35"),
-        "btn_primary": "#2DA44E",
-        "btn_primary_hover": "#2C974B",
-        "btn_transparent_hover": "#E8E8E8",
-        "separator": ("gray70", "gray30"),
-        "input_placeholder": "#999999",
-        "scrollbar": "#CCCCCC",
-        "nav_active": ("gray75", "gray28"),
-        "dual_btn": "#DDF4FF",
-        "dual_btn_hover": "#C6ECFF",
-        "terminal_prompt": "#2DA44E",
-        "status_ok": "#2DA44E",
-        "local_file_name": "#0969DA",
-    }
-
-    @classmethod
-    def _current(cls) -> dict:
-        """获取当前主题的颜色映射。"""
-        try:
-            mode = ctk.get_appearance_mode()
-        except Exception:
-            mode = "Dark"
-        return cls._dark if mode == "Dark" else cls._light
-
-    @classmethod
-    def get(cls, key: str):
-        """获取颜色值。支持 "fg_color, hover_color" 返回两个值的联合键。"""
-        return cls._current().get(key, "#000000")
-
-    @classmethod
-    def fg_hover(cls, key: str) -> tuple:
-        """获取 fg_color 和 hover_color 对。"""
-        colors = cls._current()
-        return (colors.get(key, "#000000"),
-                colors.get(f"{key}_hover", "#222222"))
+from .theme import ThemeColors
 
 
 # ============================================================
@@ -804,6 +721,19 @@ class PiManagerApp(ctk.CTk):
         opacity = self._config["appearance"].get("background_opacity", 0.15)
         BackgroundManager.set_background(bg_path, float(opacity))
 
+    def _refresh_all_canvas(self):
+        """主题/字体变更后强制刷新所有 Canvas 渲染组件。"""
+        # 强制 BackgroundManager 重绘（清除缓存）
+        BackgroundManager._processed_canvases.clear()
+        BackgroundManager._blended_cache.clear()
+        if BackgroundManager._enabled:
+            BackgroundManager._prepare_full_image()
+            BackgroundManager._refresh_all()
+        # 强制页面中所有控件重绘
+        for page in self._pages.values():
+            if page.winfo_ismapped():
+                BackgroundManager._force_draw(page)
+
     # ============================================================
     #  连接管理
     # ============================================================
@@ -924,28 +854,31 @@ class PiManagerApp(ctk.CTk):
 
     def _update_sidebar_ui(self, cpu, mem_pct, mem_used, mem_total, ip_addr, temp):
         """更新侧边栏 UI"""
+        ok, warn, danger = (ThemeColors.get(k) for k in
+                            ("status_ok", "warning", "warning_strong"))
+
         # CPU
         self._sidebar_cpu.set(cpu / 100)
         self._sidebar_cpu_pct.configure(text=f"{cpu:.0f}%")
         self._sidebar_cpu.configure(progress_color=(
-            "#4CAF50" if cpu < 50 else "#FFB347" if cpu < 80 else "#FF4444"))
+            ok if cpu < 50 else warn if cpu < 80 else danger))
 
         # RAM
         self._sidebar_ram.set(mem_pct / 100)
         self._sidebar_ram_text.configure(text=f"{mem_pct:.0f}%")
         self._sidebar_ram.configure(progress_color=(
-            "#4CAF50" if mem_pct < 50 else "#FFB347" if mem_pct < 80 else "#FF4444"))
+            ok if mem_pct < 50 else warn if mem_pct < 80 else danger))
 
         # IP
         self._sidebar_ip.configure(text=ip_addr)
 
         # 温度
         if temp >= 70:
-            temp_color = "#FF4444"
+            temp_color = danger
         elif temp >= 50:
-            temp_color = "#FFB347"
+            temp_color = warn
         else:
-            temp_color = "#4CAF50"
+            temp_color = ok
         self._sidebar_temp.configure(text=f"{temp:.1f}°C", text_color=temp_color)
 
     def _start_sidebar_refresh(self):

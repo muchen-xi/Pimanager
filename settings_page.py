@@ -208,10 +208,10 @@ class SettingsPage(ctk.CTkFrame):
         card.grid_columnconfigure(0, weight=1)
 
         info = (
-            "PiManager v1.3.3\n"
+            "PiManager v1.3.5\n"
             "轻量级树莓派 Zero W 桌面管理器\n"
             "Python + CustomTkinter + Paramiko\n"
-            "支持多标签命令终端 · 密钥认证 · 自定义背景"
+            "深色/浅色双主题 · Canvas 原生渲染 · 自定义背景"
         )
         ctk.CTkLabel(
             card,
@@ -255,6 +255,9 @@ class SettingsPage(ctk.CTkFrame):
         ctk.set_appearance_mode(theme)
         if self._app and hasattr(self._app, '_apply_background'):
             self._app.after(200, lambda: self._app._apply_background(force=True))
+        # ★ 主题切换后刷新所有 Canvas 组件的颜色
+        if self._app:
+            self._app.after(300, self._app._refresh_all_canvas)
 
     def _on_opacity_change(self, val: float):
         self._config["appearance"]["background_opacity"] = float(val)
@@ -307,8 +310,14 @@ class SettingsPage(ctk.CTkFrame):
             messagebox.showerror("保存失败", str(e))
 
     def _update_scale_label(self):
-        """实时更新字体缩放标签"""
-        self._scale_label.configure(text=f"{self._scale_var.get():.1f}x")
+        """实时更新字体缩放标签（同步到 ThemeColors）"""
+        val = self._scale_var.get()
+        self._scale_label.configure(text=f"{val:.1f}x")
+        from .theme import ThemeColors
+        ThemeColors.set_font_scale(float(val))
+        # 刷新所有 Canvas 组件
+        if self._app:
+            self._app._refresh_all_canvas()
 
     def _update_refresh_label(self):
         """实时更新刷新间隔标签"""

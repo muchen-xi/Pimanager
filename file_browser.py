@@ -9,6 +9,7 @@ import datetime
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, Menu
+from .theme import ThemeColors
 
 
 # ===== Canvas 列表公共基类（消除 CanvasFileList / LocalFileList 重复代码） =====
@@ -24,17 +25,22 @@ class _CanvasListBase(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # 内部 tk.Canvas
+        # 内部 tk.Canvas（背景色跟随主题）
         self._canvas = tk.Canvas(
-            self, highlightthickness=0, bd=0, bg="#0D1117")
+            self, highlightthickness=0, bd=0,
+            bg=ThemeColors.get("canvas_bg"))
         self._canvas.grid(row=0, column=0, sticky="nsew")
 
         # 数据
         self._items: list[dict] = []
-        self._row_height = 32
+        self._base_row_height = 32
         self._selected_idx = -1
         self._pad_x = 8
         self._scroll_y = 0
+
+    @property
+    def _row_height(self) -> int:
+        return int(self._base_row_height * ThemeColors.get_font_scale())
 
         # 回调（由外部设置）
         self.on_click = None       # (index, item)
@@ -96,7 +102,7 @@ class _CanvasListBase(ctk.CTkFrame):
 
     def _get_name_color(self, item: dict) -> str:
         """文件名颜色 — 子类可覆盖（如本地文件用蓝色）。"""
-        return "#C9D1D9"
+        return ThemeColors.get("canvas_text")
 
     # ===== 公共 API =====
 
@@ -132,17 +138,27 @@ class _CanvasListBase(ctk.CTkFrame):
         if not self._items:
             return
 
-        self._apply_bg()
-
+        # ★ 确保布局完成再测量尺寸（修复初始渲染尺寸为 1 的问题）
+        self.update_idletasks()
         cw = c.winfo_width()
         ch = c.winfo_height()
-        if cw < 20:
-            cw = 600
+        if cw < 20 or ch < 20:
+            # 尺寸无效，延迟重试
+            if hasattr(self, '_retry_after_id'):
+                self.after_cancel(self._retry_after_id)
+            self._retry_after_id = self.after(100, self._redraw)
+            return
 
-        # 列宽
-        col_size = 90
-        col_time = 160
-        col_name = max(120, cw - col_size - col_time - self._pad_x * 4)
+        self._apply_bg()
+
+        # 列宽（窄窗口下按比例缩放，防止时间列溢出）
+        if cw < 500:
+            col_size = max(50, int(cw * 0.18))
+            col_time = max(80, int(cw * 0.32))
+        else:
+            col_size = 90
+            col_time = 160
+        col_name = max(100, cw - col_size - col_time - self._pad_x * 4)
 
         total = len(self._items)
         total_h = total * self._row_height
@@ -166,24 +182,28 @@ class _CanvasListBase(ctk.CTkFrame):
             if is_selected:
                 c.create_rectangle(
                     0, y, cw, y + self._row_height,
-                    fill="#2A5A2A", outline="", tags=("row", f"row_{i}"))
+                    fill=ThemeColors.get("canvas_selection"), outline="",
+                    tags=("row", f"row_{i}"))
 
             # 图标
             icon = self._file_icon(item)
             name_x = self._pad_x + 4
             name_color = self._get_name_color(item)
+            name_font = ThemeColors.scaled_font("Segoe UI", 12)
+            dim_font = ThemeColors.scaled_font("Segoe UI", 11)
             c.create_text(
                 name_x, y + self._row_height // 2,
                 text=f"{icon}  {item['name']}", anchor="w",
-                fill=name_color, font=("Segoe UI", 12),
+                fill=name_color, font=name_font,
                 tags=("row", f"row_{i}"))
 
             # 大小
+            dim_color = ThemeColors.get("canvas_text_dim")
             size_x = self._pad_x + col_name + 10
             c.create_text(
                 size_x + col_size, y + self._row_height // 2,
                 text=self._format_size(item), anchor="e",
-                fill="#8B949E", font=("Segoe UI", 11),
+                fill=dim_color, font=dim_font,
                 tags=("row", f"row_{i}"))
 
             # 时间
@@ -196,7 +216,7 @@ class _CanvasListBase(ctk.CTkFrame):
             c.create_text(
                 time_x, y + self._row_height // 2,
                 text=ts, anchor="e",
-                fill="#8B949E", font=("Segoe UI", 11),
+                fill=dim_color, font=dim_font,
                 tags=("row", f"row_{i}"))
 
         # 滚动条指示
@@ -207,7 +227,7 @@ class _CanvasListBase(ctk.CTkFrame):
             bar_y = int((ch - bar_h) * self._scroll_y / max(1, max_scroll))
             c.create_rectangle(
                 bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
-                fill="#555555", outline="", tags="scrollbar")
+                fill=ThemeColors.get("scrollbar"), outline="", tags="scrollbar")
 
     def _on_resize(self, event=None):
         if event and event.widget is not self:
@@ -317,7 +337,7 @@ class LocalFileList(_CanvasListBase):
 
     def _get_name_color(self, item: dict) -> str:
         """本地文件名使用蓝色以区分远程。"""
-        return "#8BCCFF"
+        return ThemeColors.get("local_file_name")
 
 
 class FileBrowser(ctk.CTkFrame):
