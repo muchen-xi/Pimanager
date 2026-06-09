@@ -163,22 +163,30 @@ class CanvasTerminalOutput(ctk.CTkFrame):
     def _do_redraw(self):
         """实际执行重绘。"""
         self._redraw_after_id = None
-        self._canvas.delete("text")
-        self._text_ids.clear()
 
         if not self._lines:
+            self._canvas.delete("text")
             self._canvas.delete("scrollbar")
             return
 
-        # ★ 确保布局完成再测量尺寸
-        self.update_idletasks()
-        cw = self._canvas.winfo_width()
-        ch = self._canvas.winfo_height()
+        # ★ 从容器取尺寸，Canvas sticky=nsew 跟随
+        cw = self.winfo_width()
+        ch = self.winfo_height()
+        if cw < 20:
+            cw = self._canvas.winfo_width()
+        if ch < 20:
+            ch = self._canvas.winfo_height()
+        if cw < 20:
+            cw = self.winfo_reqwidth()
+        if ch < 20:
+            ch = max(200, self.winfo_reqheight())
         if cw < 20 or ch < 20:
-            # 尺寸无效，延迟重试
             if not self._redraw_after_id:
-                self._redraw_after_id = self.after(100, self._do_redraw)
+                self._redraw_after_id = self.after(30, self._do_redraw)
             return
+
+        self._canvas.delete("text")
+        self._text_ids.clear()
 
         # 背景片段 — 在第一次绘制时应用
         self._apply_bg_fragment()

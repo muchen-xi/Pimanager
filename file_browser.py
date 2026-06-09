@@ -138,23 +138,34 @@ class _CanvasListBase(ctk.CTkFrame):
     def _redraw(self):
         """重绘可见行。"""
         c = self._canvas
-        c.delete("row")
-        c.delete("scrollbar")
 
         if not self._items:
+            c.delete("row")
+            c.delete("scrollbar")
             return
 
-        # ★ 确保布局完成再测量尺寸（修复初始渲染尺寸为 1 的问题）
-        self.update_idletasks()
-        cw = c.winfo_width()
-        ch = c.winfo_height()
+        # ★ 从容器 frame 取尺寸（CTk保证先layout），Canvas 跟随 sticky=nsew
+        cw = self.winfo_width()
+        ch = self.winfo_height()
+        # 备用：从 canvas 取
+        if cw < 20:
+            cw = c.winfo_width()
+        if ch < 20:
+            ch = c.winfo_height()
+        # 最后手段：要求尺寸
+        if cw < 20:
+            cw = self.winfo_reqwidth()
+        if ch < 20:
+            ch = max(200, self.winfo_reqheight())
+        # 还不行就等一帧（极少情况）
         if cw < 20 or ch < 20:
-            # 尺寸无效，延迟重试
-            if hasattr(self, '_retry_after_id'):
-                self.after_cancel(self._retry_after_id)
-            self._retry_after_id = self.after(100, self._redraw)
+            if not getattr(self, '_size_retry_scheduled', False):
+                self._size_retry_scheduled = True
+                self.after(30, self._size_retry_redraw)
             return
 
+        c.delete("row")
+        c.delete("scrollbar")
         self._apply_bg()
 
         # 列宽（窄窗口下按比例缩放，防止时间列溢出）
@@ -234,6 +245,11 @@ class _CanvasListBase(ctk.CTkFrame):
             c.create_rectangle(
                 bar_x, bar_y, bar_x + bar_w, bar_y + bar_h,
                 fill=ThemeColors.get("scrollbar"), outline="", tags="scrollbar")
+
+    def _size_retry_redraw(self):
+        """尺寸不足时的延迟重试（仅一次）。"""
+        self._size_retry_scheduled = False
+        self._redraw()
 
     def _on_resize(self, event=None):
         if event and event.widget is not self:
