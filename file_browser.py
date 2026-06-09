@@ -20,6 +20,11 @@ class _CanvasListBase(ctk.CTkFrame):
     子类只需实现：refresh/navigate 等数据获取方法。
     """
 
+    @property
+    def _row_height(self) -> int:
+        """行高（跟随字体缩放动态计算）。"""
+        return int(self._base_row_height * ThemeColors.get_font_scale())
+
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color="transparent", corner_radius=0, **kwargs)
         self.grid_columnconfigure(0, weight=1)
@@ -37,10 +42,6 @@ class _CanvasListBase(ctk.CTkFrame):
         self._selected_idx = -1
         self._pad_x = 8
         self._scroll_y = 0
-
-    @property
-    def _row_height(self) -> int:
-        return int(self._base_row_height * ThemeColors.get_font_scale())
 
         # 回调（由外部设置）
         self.on_click = None       # (index, item)

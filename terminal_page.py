@@ -39,6 +39,11 @@ class CanvasTerminalOutput(ctk.CTkFrame):
     - 滚动条点击跳转
     """
 
+    @property
+    def _line_height(self) -> int:
+        """行高（跟随字体缩放动态计算）。"""
+        return int(self._base_line_height * ThemeColors.get_font_scale())
+
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color="transparent", corner_radius=0, **kwargs)
         self.grid_columnconfigure(0, weight=1)
@@ -58,10 +63,6 @@ class CanvasTerminalOutput(ctk.CTkFrame):
         self._pad_x = 12
         self._pad_y = 8
         self._visible_start = 0
-
-    @property
-    def _line_height(self) -> int:
-        return int(self._base_line_height * ThemeColors.get_font_scale())
 
         # ★ 自动滚动标志：True=新输出自动追底，False=用户正在查看历史
         self._auto_scroll = True
