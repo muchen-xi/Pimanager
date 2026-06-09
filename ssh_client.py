@@ -521,7 +521,7 @@ class SSHClient:
         # ★ 一次 SSH 调用获取所有数据，每行一个字段
         script = (
             "echo CPU_TEMP:$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0);"
-            "echo CPU_PCT:$(top -bn2 -d 0.3 | grep '%Cpu' | tail -1 | sed 's/,/ /g' | awk '{for(i=1;i<=NF;i++) if($i~/^id$/){print 100-$(i-1);exit}}');"
+            "echo CPU_PCT:$(top -bn2 -d 0.3 | grep '%Cpu' | tail -1 | sed 's/,/ /g' | awk '{p=\"\";for(i=1;i<=NF;i++){if($i~/^id$/){print 100-p;exit};p=$i}}');"
             "echo MEM:$(free -m | grep Mem | awk '{print $2,$3}');"
             "echo DISK:$(df -BM / | tail -1 | awk '{print $2,$3,$5}' | tr -d '%');"
             "echo UPTIME:$(uptime -p 2>/dev/null || uptime);"
@@ -569,7 +569,7 @@ class SSHClient:
         """获取侧边栏精简状态（1 次 SSH 往返）。"""
         script = (
             # ★ 侧栏用 -bn1 快速采样（top自身开销<10%,可接受）
-            "echo CPU_PCT:$(top -bn1 | grep '%Cpu' | head -1 | sed 's/,/ /g' | awk '{for(i=1;i<=NF;i++) if($i~/^id$/){print 100-$(i-1);exit}}');"
+            "echo CPU_PCT:$(top -bn1 | grep '%Cpu' | head -1 | sed 's/,/ /g' | awk '{p=\"\";for(i=1;i<=NF;i++){if($i~/^id$/){print 100-p;exit};p=$i}}');"
             "echo MEM:$(free -m | grep Mem | awk '{print $2,$3}');"
             "echo IP:$(hostname -I 2>/dev/null | awk '{print $1}');"
             "echo TEMP:$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0)"
