@@ -380,114 +380,147 @@ class FileBrowser(ctk.CTkFrame):
         self._local_path = str(Path.home())
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=0)  # 路径栏
-        self.grid_rowconfigure(1, weight=0)  # 表头
-        self.grid_rowconfigure(2, weight=1)  # 文件列表
-        self.grid_rowconfigure(3, weight=0)  # 操作栏
-        self.grid_rowconfigure(4, weight=0)  # 进度/状态
+        self.grid_rowconfigure(0, weight=0)  # 工具栏
+        self.grid_rowconfigure(1, weight=1)  # 文件列表面板
+        self.grid_rowconfigure(2, weight=0)  # 操作栏
+        self.grid_rowconfigure(3, weight=0)  # 进度/状态
 
         self._build_widgets()
 
-    def _build_widgets(self):
-        """构建 UI"""
-        # ===== 路径导航栏（卡片包裹） =====
-        nav_card = self._make_card("", 0, sticky="ew", pady=(5, 2))
-        nav_card.grid_columnconfigure(2, weight=1)
+    # ===== 面板工厂 =====
 
-        # ★ 双栏模式切换按钮
+    def _build_pane(self, parent, is_remote: bool):
+        """构建一个文件面板（远程/本地），结构统一：导航 + 表头 + Canvas列表。
+
+        Returns:
+            (pane_frame, nav_frame, path_widget, file_list)
+        """
+        pane = ctk.CTkFrame(
+            parent, fg_color="transparent", corner_radius=0)
+        pane.grid_columnconfigure(0, weight=1)
+        pane.grid_rowconfigure(0, weight=0)  # 导航
+        pane.grid_rowconfigure(1, weight=0)  # 表头
+        pane.grid_rowconfigure(2, weight=1)  # 列表
+
+        # --- 导航栏 ---
+        nav = ctk.CTkFrame(pane, fg_color="transparent", corner_radius=0)
+        nav.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+
+        ctk.CTkButton(nav, text="🏠", width=32, height=22,
+                      font=ctk.CTkFont(size=11),
+                      fg_color="transparent", hover_color="#333",
+                      command=(lambda: self.navigate("/home/chenxi")) if is_remote
+                      else (lambda: self._local_navigate(str(Path.home())))
+                      ).pack(side="left", padx=1)
+
+        ctk.CTkButton(nav, text="⬆", width=32, height=22,
+                      font=ctk.CTkFont(size=11),
+                      fg_color="transparent", hover_color="#333",
+                      command=self._go_up if is_remote else self._local_go_up
+                      ).pack(side="left", padx=1)
+
+        # 路径区域（远程用面包屑，本地用标签）
+        path_widget = ctk.CTkFrame(nav, fg_color="transparent", corner_radius=0)
+        path_widget.pack(side="left", fill="x", expand=True, padx=2)
+
+        ctk.CTkButton(nav, text="🔄", width=32, height=22,
+                      font=ctk.CTkFont(size=11),
+                      fg_color="transparent", hover_color="#333",
+                      command=self.refresh if is_remote
+                      else (lambda: self._local_list.refresh())
+                      ).pack(side="right", padx=1)
+
+        # --- 表头 ---
+        header = ctk.CTkFrame(
+            pane, height=24, fg_color="transparent", corner_radius=0)
+        header.grid(row=1, column=0, sticky="ew")
+        if is_remote:
+            ctk.CTkLabel(header, text="🥧 树莓派", anchor="w",
+                         font=ctk.CTkFont(size=10, weight="bold"),
+                         text_color=ThemeColors.get("status_ok")).pack(
+                side="left", padx=8)
+        else:
+            ctk.CTkLabel(header, text="💻 本地文件", anchor="w",
+                         font=ctk.CTkFont(size=10, weight="bold"),
+                         text_color=ThemeColors.get("local_file_name")).pack(
+                side="left", padx=8)
+
+        # --- Canvas 文件列表 ---
+        list_cls = CanvasFileList if is_remote else LocalFileList
+        file_list = list_cls(pane, border_width=1,
+                             border_color=("gray55", "gray35"))
+        file_list.grid(row=2, column=0, sticky="nsew")
+
+        return pane, nav, path_widget, file_list
+
+    def _build_widgets(self):
+        """构建 UI — 统一面板架构。"""
+        # ===== Row 0: 紧凑工具栏 =====
+        toolbar = ctk.CTkFrame(
+            self, fg_color="transparent", corner_radius=0)
+        toolbar.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
+
         self._btn_mode = ctk.CTkButton(
-            nav_card, text="📂 双栏", width=70, height=28,
+            toolbar, text="📂 双栏", width=70, height=28,
             font=ctk.CTkFont(size=11), command=self._toggle_mode,
             fg_color="#1E3A5A", hover_color="#2A4A6A")
-        self._btn_mode.grid(row=0, column=0, padx=(5, 2), pady=4)
+        self._btn_mode.pack(side="left", padx=2)
 
-        self._btn_home = ctk.CTkButton(
-            nav_card, text="🏠", width=36,
-            command=lambda: self.navigate("/home/chenxi"),
-            fg_color="transparent", hover_color="#333")
-        self._btn_home.grid(row=0, column=1, padx=2, pady=4)
+        # 双栏传输按钮（默认隐藏）
+        self._btn_to_local = ctk.CTkButton(
+            toolbar, text="← 下载到本地", width=110, height=28,
+            font=ctk.CTkFont(size=12), command=self._download_to_local,
+            fg_color="#1E3A5A", hover_color="#2A4A6A")
+        self._btn_to_local.pack(side="left", padx=2)
+        self._btn_to_local.pack_forget()
 
-        self._btn_up = ctk.CTkButton(
-            nav_card, text="⬆", width=36, command=self._go_up,
-            fg_color="transparent", hover_color="#333")
-        self._btn_up.grid(row=0, column=2, padx=2, pady=4)
+        self._btn_to_remote = ctk.CTkButton(
+            toolbar, text="上传到树莓派 →", width=110, height=28,
+            font=ctk.CTkFont(size=12), command=self._upload_from_local,
+            fg_color="#1E3A5A", hover_color="#2A4A6A")
+        self._btn_to_remote.pack(side="left", padx=2)
+        self._btn_to_remote.pack_forget()
 
-        self._path_frame = ctk.CTkFrame(nav_card, fg_color="transparent", corner_radius=0)
-        self._path_frame.grid(row=0, column=3, sticky="ew", padx=5)
+        ctk.CTkLabel(toolbar, text="文件管理", anchor="e",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color="gray").pack(side="right", padx=8)
 
-        self._btn_refresh = ctk.CTkButton(
-            nav_card, text="🔄", width=36, command=self.refresh,
-            fg_color="transparent", hover_color="#333")
-        self._btn_refresh.grid(row=0, column=4, padx=(2, 5), pady=4)
-
-        # ===== 文件列表头 =====
-        header_frame = ctk.CTkFrame(
-            self, height=30, fg_color="transparent", border_width=1,
-            border_color=("gray55", "gray35"), corner_radius=6)
-        header_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 0))
-        header_frame.grid_columnconfigure(0, weight=1)
-        header_frame.grid_columnconfigure(1, weight=0)
-        header_frame.grid_columnconfigure(2, weight=0)
-
-        ctk.CTkLabel(header_frame, text="  名称", anchor="w",
-                     font=ctk.CTkFont(size=12, weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=8, pady=2)
-        ctk.CTkLabel(header_frame, text="大小", width=90, anchor="e",
-                     font=ctk.CTkFont(size=12, weight="bold")).grid(
-            row=0, column=1, sticky="e", padx=8, pady=2)
-        ctk.CTkLabel(header_frame, text="修改时间", width=160, anchor="e",
-                     font=ctk.CTkFont(size=12, weight="bold")).grid(
-            row=0, column=2, sticky="e", padx=8, pady=2)
-
-        # ===== 文件列表容器 =====
-        self._list_container = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-        self._list_container.grid(row=2, column=0, sticky="nsew", padx=2, pady=(0, 5))
+        # ===== Row 1: 双栏容器 =====
+        self._list_container = ctk.CTkFrame(
+            self, fg_color="transparent", corner_radius=0)
+        self._list_container.grid(
+            row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
         self._list_container.grid_columnconfigure(0, weight=1)
         self._list_container.grid_columnconfigure(1, weight=0)
         self._list_container.grid_rowconfigure(0, weight=1)
 
-        # 远程列表
-        self._file_list = CanvasFileList(
-            self._list_container, border_width=1, border_color=("gray55", "gray35"))
-        self._file_list.grid(row=0, column=0, sticky="nsew")
-
-        # 设置回调
+        # 远程面板
+        self._remote_pane, _, self._path_frame, self._file_list = \
+            self._build_pane(self._list_container, is_remote=True)
+        self._remote_pane.grid(row=0, column=0, sticky="nsew")
+        # 设置远程回调
         self._file_list.on_click = self._on_click
         self._file_list.on_double_click = self._on_double_click
         self._file_list.on_right_click = self._on_right_click
 
-        # ★ 本地面板容器（双栏模式专用：nav + list）
-        self._dual_pane = ctk.CTkFrame(
-            self._list_container, fg_color="transparent", corner_radius=0)
-        self._dual_pane.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        self._dual_pane.grid_remove()
-        self._dual_pane.grid_columnconfigure(0, weight=1)
-        self._dual_pane.grid_rowconfigure(0, weight=0)  # 本地导航
-        self._dual_pane.grid_rowconfigure(1, weight=0)  # 本地表头
-        self._dual_pane.grid_rowconfigure(2, weight=1)  # 本地列表
-
-        # 本地导航栏
-        self._local_nav = self._build_local_nav(self._dual_pane)
-
-        # 本地列表头（精简版）
-        local_header = ctk.CTkFrame(
-            self._dual_pane, height=22, fg_color="transparent", corner_radius=0)
-        local_header.grid(row=1, column=0, sticky="ew")
-        ctk.CTkLabel(local_header, text="💻 本地文件", anchor="w",
-                     font=ctk.CTkFont(size=10, weight="bold"),
-                     text_color=ThemeColors.get("local_file_name")).pack(
-            side="left", padx=8)
-
-        # 本地文件列表
-        self._local_list = LocalFileList(
-            self._dual_pane, border_width=1, border_color=("gray55", "gray35"))
-        self._local_list.grid(row=2, column=0, sticky="nsew")
+        # 本地面板（仅双栏模式可见）
+        self._local_pane, self._local_nav, self._local_path_area, self._local_list = \
+            self._build_pane(self._list_container, is_remote=False)
+        self._local_pane.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        self._local_pane.grid_remove()
+        # ★ 替换掉 _local_path_area frame，改用简单的 label
+        self._local_path_label = ctk.CTkLabel(
+            self._local_nav, text="", anchor="w",
+            font=ctk.CTkFont(size=10), text_color="gray")
+        self._local_path_label.pack(side="left", fill="x", expand=True, padx=4)
+        self._local_path_area.destroy()  # 不用的 frame 销毁
+        # 设置本地回调
         self._local_list.on_click = self._on_local_click
         self._local_list.on_double_click = self._on_local_double
         self._local_list.on_right_click = self._on_local_right
 
-        # ===== 操作按钮栏 =====
-        btn_card = self._make_card("", 3, sticky="ew", pady=(0, 5))
+        # ===== 操作按钮栏 (Row 2) =====
+        btn_card = self._make_card("", 2, sticky="ew", pady=(0, 5))
         btn_card.grid_columnconfigure(0, weight=1)
 
         btn_left = ctk.CTkFrame(btn_card, fg_color="transparent", corner_radius=0)
@@ -542,15 +575,15 @@ class FileBrowser(ctk.CTkFrame):
             fg_color="#8B0000", hover_color="#A00000")
         self._btn_delete.pack(side="left", padx=2)
 
-        # ===== 进度条 + 状态 =====
+        # ===== 进度条 + 状态 (Row 3) =====
         self._progress = ctk.CTkProgressBar(self)
-        self._progress.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 2))
+        self._progress.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 2))
         self._progress.set(0)
         self._progress.grid_remove()
 
         self._lbl_progress = ctk.CTkLabel(self, text="", text_color="gray",
                                           font=ctk.CTkFont(size=11))
-        self._lbl_progress.grid(row=4, column=0, sticky="e", padx=15, pady=(0, 2))
+        self._lbl_progress.grid(row=3, column=0, sticky="e", padx=15, pady=(0, 2))
 
     def _make_card(self, title: str, row: int, sticky="ew", **grid_kw):
         """统一卡片容器 — 透明背景 + 细边框，背景图穿透"""
@@ -877,40 +910,7 @@ class FileBrowser(ctk.CTkFrame):
             else:
                 messagebox.showerror("重命名失败", msg)
 
-    # ===== 本地导航栏 =====
-
-    def _build_local_nav(self, parent):
-        """构建本地面板导航栏（仅双栏模式可见）。"""
-        nav = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=0)
-        nav.grid(row=0, column=0, sticky="ew", pady=(0, 2))
-
-        ctk.CTkButton(
-            nav, text="🏠", width=32, height=22,
-            font=ctk.CTkFont(size=11),
-            fg_color="transparent", hover_color="#333",
-            command=lambda: self._local_navigate(str(Path.home()))
-        ).pack(side="left", padx=1)
-
-        ctk.CTkButton(
-            nav, text="⬆", width=32, height=22,
-            font=ctk.CTkFont(size=11),
-            fg_color="transparent", hover_color="#333",
-            command=self._local_go_up
-        ).pack(side="left", padx=1)
-
-        self._local_path_label = ctk.CTkLabel(
-            nav, text="", anchor="w",
-            font=ctk.CTkFont(size=10), text_color="gray")
-        self._local_path_label.pack(side="left", fill="x", expand=True, padx=4)
-
-        ctk.CTkButton(
-            nav, text="🔄", width=32, height=22,
-            font=ctk.CTkFont(size=11),
-            fg_color="transparent", hover_color="#333",
-            command=lambda: self._local_list.refresh()
-        ).pack(side="right", padx=1)
-
-        return nav
+    # ===== 本地导航 =====
 
     def _local_navigate(self, path: str):
         """本地导航到指定路径。"""
@@ -933,21 +933,19 @@ class FileBrowser(ctk.CTkFrame):
             self._mode = "dual"
             self._btn_mode.configure(text="📂 单栏", fg_color="#2A5A2A", hover_color="#3A6A3A")
             self._list_container.grid_columnconfigure(1, weight=1)
-            self._dual_pane.grid()
+            self._local_pane.grid()
             self._btn_to_local.pack(side="left", padx=2)
             self._btn_to_remote.pack(side="left", padx=2)
             self._local_navigate(self._local_path)
-            # 强制 layout → 两栏各得 50% 宽度 → 重绘
             self._list_container.update_idletasks()
             self._file_list._redraw()
         else:
             self._mode = "single"
             self._btn_mode.configure(text="📂 双栏", fg_color="#1E3A5A", hover_color="#2A4A6A")
-            self._dual_pane.grid_remove()
+            self._local_pane.grid_remove()
             self._btn_to_local.pack_forget()
             self._btn_to_remote.pack_forget()
             self._list_container.grid_columnconfigure(1, weight=0)
-            # 强制 layout → 让远程列表扩展填满 → 重绘
             self._list_container.update_idletasks()
             self._file_list._redraw()
 
