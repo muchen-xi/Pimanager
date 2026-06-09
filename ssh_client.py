@@ -521,7 +521,7 @@ class SSHClient:
         # ★ 一次 SSH 调用获取所有数据，每行一个字段
         script = (
             "echo CPU_TEMP:$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0);"
-            "echo CPU_PCT:$(top -bn1 | grep 'CPU' | head -1 | awk '{print $2+$4}');"
+            "echo CPU_PCT:$(top -bn1 | grep -i 'cpu' | head -1 | awk '{print 100-$8}');"
             "echo MEM:$(free -m | grep Mem | awk '{print $2,$3}');"
             "echo DISK:$(df -BM / | tail -1 | awk '{print $2,$3,$5}' | tr -d '%');"
             "echo UPTIME:$(uptime -p 2>/dev/null || uptime);"
@@ -568,7 +568,7 @@ class SSHClient:
     def get_sidebar_stats(self) -> dict:
         """获取侧边栏精简状态（1 次 SSH 往返）。"""
         script = (
-            "echo CPU_PCT:$(top -bn1 | grep 'CPU' | head -1 | awk '{print $2+$4}');"
+            "echo CPU_PCT:$(top -bn1 | grep -i 'cpu' | head -1 | awk '{print 100-$8}');"
             "echo MEM:$(free -m | grep Mem | awk '{print $2,$3}');"
             "echo IP:$(hostname -I 2>/dev/null | awk '{print $1}');"
             "echo TEMP:$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null || echo 0)"
