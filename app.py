@@ -24,23 +24,25 @@ from .pillui import PageCanvas, PillowButton, PillowLabel, PillowProgressBar, Pi
 # ============================================================
 
 class BackgroundManager:
-    """全局背景管理 — 加载图片 + 与暗色混合 → PageCanvas 拿去做 Layer 0。"""
+    """全局背景管理 — 加载图片 + 与暗色混合 → Canvas 背景。"""
 
     _blended: Image.Image = None
     _opacity: float = 0.15
     _path: str = ""
-    _canvases: list = []  # 注册的 PageCanvas
+    _canvases: list = []  # PageCanvas 或 tk.Canvas
+    _tk_images: dict = {}  # id → PhotoImage (防回收)
 
     @classmethod
-    def register(cls, canvas: PageCanvas):
-        """注册一个 PageCanvas，背景更新时自动同步。"""
+    def register(cls, canvas):
+        """注册一个 canvas（PageCanvas 或 tk.Canvas）。"""
         if canvas not in cls._canvases:
             cls._canvases.append(canvas)
 
     @classmethod
-    def unregister(cls, canvas: PageCanvas):
+    def unregister(cls, canvas):
         if canvas in cls._canvases:
             cls._canvases.remove(canvas)
+            cls._tk_images.pop(id(canvas), None)
 
     @classmethod
     def set_background(cls, path: str, opacity: float):
@@ -61,12 +63,14 @@ class BackgroundManager:
                 cls._blended = None
         else:
             cls._blended = None
+        cls._tk_images.clear()
         cls._refresh()
 
     @classmethod
     def clear(cls):
         cls._path = ""
         cls._blended = None
+        cls._tk_images.clear()
         cls._refresh()
 
     @classmethod
@@ -79,13 +83,42 @@ class BackgroundManager:
         return cls._blended
 
     @classmethod
+    def apply_to_canvas(cls, canvas):
+        """将混合背景绘制到原始 tk.Canvas（供文件列表/终端调用）。"""
+        if cls._blended is None:
+            return
+        try:
+            cw = canvas.winfo_width()
+            ch = canvas.winfo_height()
+            if cw < 20 or ch < 20:
+                return
+            img = cls._blended.resize((cw, ch), Image.LANCZOS)
+            tk_img = ImageTk.PhotoImage(img)
+            cls._tk_images[id(canvas)] = tk_img
+            canvas.delete("bg_image")
+            canvas.create_image(0, 0, anchor="nw", image=tk_img, tags="bg_image")
+            canvas.tag_lower("bg_image")
+        except Exception:
+            pass
+
+    @classmethod
     def _refresh(cls):
         for c in cls._canvases:
-            if cls._blended:
-                c.set_bg_image(cls._blended)
-            else:
-                c.set_bg_color(ThemeColors.get("bg"))
-            c.render()
+            try:
+                if hasattr(c, 'set_bg_image') and hasattr(c, 'render'):
+                    # PageCanvas
+                    if cls._blended:
+                        c.set_bg_image(cls._blended)
+                    else:
+                        c.set_bg_color(ThemeColors.get("bg"))
+                    c.render()
+                else:
+                    # 原始 tk.Canvas
+                    c.delete("bg_image")
+                    if cls._blended:
+                        cls.apply_to_canvas(c)
+            except Exception:
+                pass
 
 
 # ============================================================
@@ -138,7 +171,7 @@ class PiManagerApp(tk.Tk):
             bg=ThemeColors.get("bg")
         )
         self._sidebar.pack(fill="both", expand=True)
-        BackgroundManager.register(self._sidebar)
+        # 侧边栏不用背景图，保持纯色
         self._build_sidebar()
 
         # ===== 主内容区 =====

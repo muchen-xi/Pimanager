@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 
 from .theme import ThemeColors
+from .app import BackgroundManager
 
 
 # ============================================================
@@ -33,6 +34,9 @@ class _CanvasListBase(tk.Frame):
         self._canvas.bind("<Double-Button-1>", self._on_dblclick)
         self._canvas.bind("<Button-3>", self._on_rightclick)
         self._canvas.bind("<Configure>", lambda e: self._redraw())
+
+        # 注册背景图
+        BackgroundManager.register(self._canvas)
 
     def set_items(self, items: list):
         self._items = items
@@ -69,6 +73,9 @@ class _CanvasListBase(tk.Frame):
         c = self._canvas
         c.delete("all")
         cw = c.winfo_width() or 400
+
+        # 绘制背景图
+        BackgroundManager.apply_to_canvas(c)
 
         s = ThemeColors.get("text_secondary")
         t = ThemeColors.get("text")

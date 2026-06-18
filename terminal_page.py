@@ -6,6 +6,7 @@ import threading
 from collections import deque
 
 from .theme import ThemeColors
+from .app import BackgroundManager
 
 
 # ============================================================
@@ -32,6 +33,9 @@ class CanvasTerminalOutput(tk.Frame):
 
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
         self._canvas.bind("<Configure>", lambda e: self._redraw())
+
+        # 注册背景图
+        BackgroundManager.register(self._canvas)
 
     def insert(self, pos, text: str, tag=None):
         """添加一行文字。兼容旧 API。"""
@@ -78,8 +82,11 @@ class CanvasTerminalOutput(tk.Frame):
         c.delete("all")
         cw = c.winfo_width() or 400
 
+        # 绘制背景图
+        BackgroundManager.apply_to_canvas(c)
+
         y0 = -self._scroll_y
-        font = ("Consolas", 10)
+        font = ("Microsoft YaHei", 10)
 
         for i, (text, color) in enumerate(self._lines):
             y = y0 + i * 18
