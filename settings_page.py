@@ -1,17 +1,24 @@
 """
-PiManager 设置页面 - 卡片式布局，对齐 StatusPanel 视觉风格
+PiManager 设置页面 v2 — Pillow Canvas 渲染
 """
-import customtkinter as ctk
-import os
+import tkinter as tk
 from tkinter import filedialog, messagebox
-from PIL import Image
+import os
+
+from .theme import ThemeColors
+from .pillui import (PageCanvas, PillowButton, PillowLabel,
+                     PillowProgressBar, PillowCard)
+from .pillui.slider import PillowSlider
+from .pillui.checkbox import PillowCheckBox
+from .pillui.option_menu import PillowOptionMenu
+from .app import BackgroundManager
 
 
-class SettingsPage(ctk.CTkFrame):
-    """应用设置页面"""
+class SettingsPage(tk.Frame):
+    """应用设置页面 — 全 Pillow 渲染。"""
 
     def __init__(self, master, config: dict, ssh_client=None, app_ref=None):
-        super().__init__(master, fg_color="transparent", corner_radius=0)
+        super().__init__(master, bg=ThemeColors.get("bg"))
         self._config = config
         self._ssh = ssh_client
         self._app = app_ref
@@ -19,289 +26,218 @@ class SettingsPage(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # 可滚动容器
-        self._scroll = ctk.CTkScrollableFrame(
-            self, fg_color="transparent", corner_radius=0
-        )
-        self._scroll.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-        self._scroll.grid_columnconfigure(0, weight=1)
+        self._canvas = PageCanvas(self, width=800, height=650,
+                                  bg=ThemeColors.get("bg"))
+        self._canvas.grid(row=0, column=0, sticky="nsew")
+        BackgroundManager.register(self._canvas)
 
         self._build_appearance_card()
         self._build_background_card()
         self._build_behavior_card()
         self._build_about_card()
 
+        self._canvas.render()
+
     # ===== 外观卡片 =====
 
     def _build_appearance_card(self):
-        card = self._make_card("🎨 外观设置")
-        card.grid_columnconfigure(1, weight=1)
+        c = self._canvas
+        y0 = 10
 
-        row = 1  # row=0 已被标题占据
+        c.add("appearance_card",
+              PillowCard(10, y0, 540, 170, title="🎨 外观设置",
+                         fill="#161B22", border="gray30"))
 
         # 主题模式
-        ctk.CTkLabel(card, text="主题模式", anchor="w").grid(
-            row=row, column=0, sticky="w", padx=12, pady=8
-        )
-        theme_var = ctk.StringVar(value=self._config["appearance"]["theme"])
-        ctk.CTkOptionMenu(
-            card,
-            values=["dark", "light"],
-            variable=theme_var,
-            width=120,
-            command=lambda v: self._on_theme_change(v),
-        ).grid(row=row, column=1, sticky="e", padx=12, pady=8)
-        row += 1
+        self._theme_var = tk.StringVar(
+            value=self._config["appearance"]["theme"])
+        c.add("theme_label",
+              PillowLabel("主题模式", 24, y0 + 40, 100, 24,
+                          font_size=12, color="#C9D1D9"))
+        c.add("theme_menu",
+              PillowOptionMenu(380, y0 + 37, 120, 28,
+                               values=["dark", "light"],
+                               variable=self._theme_var,
+                               command=self._on_theme_change))
 
         # 颜色主题
-        ctk.CTkLabel(card, text="颜色主题", anchor="w").grid(
-            row=row, column=0, sticky="w", padx=12, pady=8
-        )
-        color_var = ctk.StringVar(value=self._config["appearance"]["color_theme"])
-        ctk.CTkOptionMenu(
-            card,
-            values=["green", "blue", "dark-blue"],
-            variable=color_var,
-            width=120,
-            command=lambda v: ctk.set_default_color_theme(v),
-        ).grid(row=row, column=1, sticky="e", padx=12, pady=8)
-        row += 1
+        self._color_var = tk.StringVar(
+            value=self._config["appearance"]["color_theme"])
+        c.add("color_label",
+              PillowLabel("颜色主题", 24, y0 + 80, 100, 24,
+                          font_size=12, color="#C9D1D9"))
+        c.add("color_menu",
+              PillowOptionMenu(380, y0 + 77, 120, 28,
+                               values=["green", "blue", "dark-blue"],
+                               variable=self._color_var))
 
         # 字体缩放
-        ctk.CTkLabel(card, text="字体缩放", anchor="w").grid(
-            row=row, column=0, sticky="w", padx=12, pady=8
-        )
-        scale_var = ctk.DoubleVar(value=self._config["appearance"]["font_scale"])
-        scale_frame = ctk.CTkFrame(card, fg_color="transparent", corner_radius=0)
-        scale_frame.grid(row=row, column=1, sticky="e", padx=12, pady=8)
-        ctk.CTkSlider(
-            scale_frame,
-            from_=0.8,
-            to=1.5,
-            number_of_steps=7,
-            variable=scale_var,
-            width=180,
-            command=lambda v: (ctk.set_widget_scaling(float(v)), self._update_scale_label()),
-        ).pack(side="left", padx=(0, 8))
-        self._scale_label = ctk.CTkLabel(scale_frame, text=f"{scale_var.get():.1f}x", width=35)
-        self._scale_label.pack(side="left")
-        row += 1
-
-        self._theme_var = theme_var
-        self._color_var = color_var
-        self._scale_var = scale_var
+        self._scale_var = tk.DoubleVar(
+            value=self._config["appearance"]["font_scale"])
+        c.add("scale_label",
+              PillowLabel("字体缩放", 24, y0 + 120, 100, 24,
+                          font_size=12, color="#C9D1D9"))
+        c.add("scale_slider",
+              PillowSlider(140, y0 + 122, 260, 24,
+                           from_val=0.8, to_val=1.5, steps=7,
+                           variable=self._scale_var,
+                           command=self._on_scale_change))
+        self._scale_pct = PillowLabel("1.0x", 410, y0 + 120, 60, 24,
+                                      font_size=12, color="#8B949E")
+        c.add("scale_pct", self._scale_pct)
 
     # ===== 背景卡片 =====
 
     def _build_background_card(self):
-        card = self._make_card("🖼️ 背景设置")
-        card.grid_columnconfigure(1, weight=1)
+        c = self._canvas
+        y0 = 190
 
-        row = 1  # row=0 已被标题占据
+        c.add("bg_card",
+              PillowCard(10, y0, 540, 170, title="🖼️ 背景设置",
+                         fill="#161B22", border="gray30"))
 
         # 当前背景
-        ctk.CTkLabel(card, text="当前背景", anchor="w").grid(
-            row=row, column=0, sticky="w", padx=12, pady=8
-        )
         bg_path = self._config["appearance"].get("background_path", "")
         display = os.path.basename(bg_path) if bg_path else "未设置"
-        self._bg_label = ctk.CTkLabel(card, text=display, text_color="gray", anchor="e")
-        self._bg_label.grid(row=row, column=1, sticky="e", padx=12, pady=8)
-        row += 1
+        self._bg_label = PillowLabel(f"当前: {display}", 24, y0 + 40, 300, 24,
+                                     font_size=12, color="#8B949E")
+        c.add("bg_path", self._bg_label)
 
         # 选择/清除按钮
-        btn_frame = ctk.CTkFrame(card, fg_color="transparent", corner_radius=0)
-        btn_frame.grid(row=row, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 6))
-        ctk.CTkButton(
-            btn_frame,
-            text="📂 选择图片",
-            width=100,
-            height=28,
-            command=self._choose_bg,
-            fg_color="#2B5B2B",
-            hover_color="#3A7A3A",
-        ).pack(side="left", padx=2)
-        ctk.CTkButton(
-            btn_frame,
-            text="🗑 清除背景",
-            width=100,
-            height=28,
-            fg_color="transparent",
-            border_width=1,
-            border_color=("gray40", "gray30"),
-            command=self._clear_bg,
-        ).pack(side="left", padx=2)
-        row += 1
+        c.add("btn_choose_bg",
+              PillowButton("📂 选择图片", 24, y0 + 72, 120, 28,
+                           command=self._choose_bg, font_size=11))
+        c.add("btn_clear_bg",
+              PillowButton("🗑 清除背景", 154, y0 + 72, 120, 28,
+                           command=self._clear_bg,
+                           style="transparent", font_size=11))
 
         # 透明度
-        ctk.CTkLabel(card, text="背景透明度", anchor="w").grid(
-            row=row, column=0, sticky="w", padx=12, pady=8
-        )
-        opacity_var = ctk.DoubleVar(value=self._config["appearance"]["background_opacity"])
-        opacity_frame = ctk.CTkFrame(card, fg_color="transparent")
-        opacity_frame.grid(row=row, column=1, sticky="e", padx=12, pady=8)
-        ctk.CTkSlider(
-            opacity_frame,
-            from_=0.05,
-            to=0.5,
-            number_of_steps=9,
-            variable=opacity_var,
-            width=180,
-            command=lambda v: self._on_opacity_change(float(v)),
-        ).pack(side="left", padx=(0, 8))
-        self._opacity_label = ctk.CTkLabel(opacity_frame, text=f"{int(opacity_var.get()*100)}%", width=35)
-        self._opacity_label.pack(side="left")
-        row += 1
-
-        self._opacity_var = opacity_var
+        self._opacity_var = tk.DoubleVar(
+            value=self._config["appearance"]["background_opacity"])
+        c.add("opacity_label",
+              PillowLabel("背景透明度", 24, y0 + 112, 100, 24,
+                          font_size=12, color="#C9D1D9"))
+        c.add("opacity_slider",
+              PillowSlider(140, y0 + 114, 260, 24,
+                           from_val=0.05, to_val=0.5, steps=9,
+                           variable=self._opacity_var,
+                           command=self._on_opacity_change))
+        self._opacity_pct = PillowLabel("15%", 410, y0 + 112, 60, 24,
+                                        font_size=12, color="#8B949E")
+        c.add("opacity_pct", self._opacity_pct)
 
     # ===== 行为卡片 =====
 
     def _build_behavior_card(self):
-        card = self._make_card("⚡ 行为设置")
-        card.grid_columnconfigure(1, weight=1)
+        c = self._canvas
+        y0 = 370
 
-        row = 1  # row=0 已被标题占据
+        c.add("behavior_card",
+              PillowCard(10, y0, 540, 155, title="⚡ 行为设置",
+                         fill="#161B22", border="gray30"))
 
         # 自动连接
-        auto_var = ctk.BooleanVar(value=self._config["behavior"]["auto_connect"])
-        ctk.CTkCheckBox(
-            card, text="启动时自动连接树莓派", variable=auto_var
-        ).grid(row=row, column=0, columnspan=2, sticky="w", padx=12, pady=8)
-        row += 1
+        self._auto_var = tk.BooleanVar(
+            value=self._config["behavior"]["auto_connect"])
+        c.add("auto_check",
+              PillowCheckBox("启动时自动连接树莓派", 24, y0 + 40, 300, 24,
+                             variable=self._auto_var))
 
         # 刷新间隔
-        ctk.CTkLabel(card, text="状态刷新间隔", anchor="w").grid(
-            row=row, column=0, sticky="w", padx=12, pady=8
-        )
-        refresh_var = ctk.IntVar(value=self._config["behavior"]["refresh_interval"])
-        refresh_frame = ctk.CTkFrame(card, fg_color="transparent")
-        refresh_frame.grid(row=row, column=1, sticky="e", padx=12, pady=8)
-        ctk.CTkSlider(
-            refresh_frame,
-            from_=1,
-            to=30,
-            number_of_steps=29,
-            variable=refresh_var,
-            width=180,
-            command=lambda v: self._update_refresh_label(),
-        ).pack(side="left", padx=(0, 8))
-        self._refresh_label = ctk.CTkLabel(refresh_frame, text=f"{refresh_var.get()}秒", width=35)
-        self._refresh_label.pack(side="left")
-        row += 1
+        self._refresh_var = tk.IntVar(
+            value=self._config["behavior"]["refresh_interval"])
+        c.add("refresh_label",
+              PillowLabel("状态刷新间隔", 24, y0 + 74, 110, 24,
+                          font_size=12, color="#C9D1D9"))
+        c.add("refresh_slider",
+              PillowSlider(140, y0 + 76, 260, 24,
+                           from_val=1, to_val=30, steps=29,
+                           variable=self._refresh_var,
+                           command=self._on_refresh_change))
+        self._refresh_pct = PillowLabel("3秒", 410, y0 + 74, 60, 24,
+                                         font_size=12, color="#8B949E")
+        c.add("refresh_pct", self._refresh_pct)
 
         # 删除确认
-        confirm_var = ctk.BooleanVar(value=self._config["behavior"]["confirm_before_delete"])
-        ctk.CTkCheckBox(
-            card, text="删除文件前弹出确认对话框", variable=confirm_var
-        ).grid(row=row, column=0, columnspan=2, sticky="w", padx=12, pady=8)
-        row += 1
-
-        self._auto_var = auto_var
-        self._refresh_var = refresh_var
-        self._confirm_var = confirm_var
+        self._confirm_var = tk.BooleanVar(
+            value=self._config["behavior"]["confirm_before_delete"])
+        c.add("confirm_check",
+              PillowCheckBox("删除文件前弹出确认对话框", 24, y0 + 108, 300, 24,
+                             variable=self._confirm_var))
 
     # ===== 关于卡片 =====
 
     def _build_about_card(self):
-        card = self._make_card("ℹ️ 关于")
-        card.grid_columnconfigure(0, weight=1)
+        c = self._canvas
+        y0 = 535
 
-        info = (
-            "PiManager v1.3.5\n"
-            "轻量级树莓派 Zero W 桌面管理器\n"
-            "Python + CustomTkinter + Paramiko\n"
-            "深色/浅色双主题 · Canvas 原生渲染 · 自定义背景"
-        )
-        ctk.CTkLabel(
-            card,
-            text=info,
-            justify="left",
-            anchor="w",
-            text_color="gray",
-            font=ctk.CTkFont(size=11),
-        ).grid(row=1, column=0, sticky="w", padx=12, pady=10)
+        c.add("about_card",
+              PillowCard(10, y0, 540, 100, title="ℹ️ 关于",
+                         fill="#161B22", border="gray30"))
 
-        # 保存按钮
-        ctk.CTkButton(
-            card,
-            text="💾 保存所有设置",
-            height=34,
-            fg_color="#2B5B2B",
-            hover_color="#3A7A3A",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._save_all,
-        ).grid(row=2, column=0, pady=(5, 12), padx=12)
+        info = "PiManager v2.0.0\n轻量级树莓派 Zero W 桌面管理器\nPython + tkinter + Pillow + Paramiko\n深色/浅色双主题 · Canvas 原生渲染"
+        c.add("about_text",
+              PillowLabel(info, 24, y0 + 38, 400, 70,
+                          font_size=11, color="#8B949E"))
 
-    # ===== 卡片工厂 =====
-
-    def _make_card(self, title: str) -> ctk.CTkFrame:
-        """创建一致风格的卡片容器（纯 grid 布局，标题占 row=0）"""
-        card = ctk.CTkFrame(self._scroll)
-        card.pack(fill="x", padx=2, pady=6)
-
-        ctk.CTkLabel(
-            card,
-            text=title,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            anchor="w",
-        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 4))
-
-        return card
+        c.add("btn_save",
+              PillowButton("💾 保存所有设置", 380, y0 + 50, 150, 34,
+                           command=self._save_all, font_size=12))
 
     # ===== 事件处理 =====
 
     def _on_theme_change(self, theme: str):
-        ctk.set_appearance_mode(theme)
-        if self._app and hasattr(self._app, '_apply_background'):
-            self._app.after(200, lambda: self._app._apply_background(force=True))
-        # ★ 主题切换后刷新所有 Canvas 组件的颜色
+        ThemeColors.set_mode(theme)
         if self._app:
-            self._app.after(300, self._app._refresh_all_canvas)
+            self._app.after(200, lambda: self._app._apply_background(force=True))
+            self._app.after(300, self._app.refresh_all_canvases)
+
+    def _on_scale_change(self, val: float):
+        self._scale_pct.set_text(f"{val:.1f}x")
+        ThemeColors.set_font_scale(float(val))
+        if self._app:
+            self._app.refresh_all_canvases()
 
     def _on_opacity_change(self, val: float):
+        self._opacity_pct.set_text(f"{int(val * 100)}%")
         self._config["appearance"]["background_opacity"] = float(val)
-        self._opacity_label.configure(text=f"{int(val*100)}%")
-        if self._app and hasattr(self._app, '_apply_background'):
+        if self._app:
             self._app._apply_background(force=True)
+
+    def _on_refresh_change(self, val: int):
+        self._refresh_pct.set_text(f"{int(val)}秒")
 
     def _choose_bg(self):
         path = filedialog.askopenfilename(
             title="选择背景图片",
-            filetypes=[("图片文件", "*.jpg *.jpeg *.png *.bmp *.gif"), ("所有文件", "*.*")],
-        )
+            filetypes=[("图片文件", "*.jpg *.jpeg *.png *.bmp *.gif"),
+                       ("所有文件", "*.*")])
         if path:
             self._config["appearance"]["background_path"] = path
-            self._bg_label.configure(text=os.path.basename(path))
-            if self._app and hasattr(self._app, '_apply_background'):
+            self._bg_label.set_text(f"当前: {os.path.basename(path)}")
+            if self._app:
                 self._app._apply_background(force=True)
 
     def _clear_bg(self):
         self._config["appearance"]["background_path"] = ""
-        self._bg_label.configure(text="未设置")
-        if self._app and hasattr(self._app, 'BackgroundManager'):
-            from .app import BackgroundManager
-            BackgroundManager.clear()
+        self._bg_label.set_text("当前: 未设置")
+        BackgroundManager.clear()
 
     def _save_all(self):
-        """保存所有设置"""
         from .config import save_config
 
-        self._config["appearance"].update(
-            {
-                "theme": self._theme_var.get(),
-                "color_theme": self._color_var.get(),
-                "font_scale": float(self._scale_var.get()),
-                "background_opacity": float(self._opacity_var.get()),
-            }
-        )
-        self._config["behavior"].update(
-            {
-                "auto_connect": bool(self._auto_var.get()),
-                "refresh_interval": int(self._refresh_var.get()),
-                "confirm_before_delete": bool(self._confirm_var.get()),
-            }
-        )
+        self._config["appearance"].update({
+            "theme": self._theme_var.get(),
+            "color_theme": self._color_var.get(),
+            "font_scale": float(self._scale_var.get()),
+            "background_opacity": float(self._opacity_var.get()),
+        })
+        self._config["behavior"].update({
+            "auto_connect": bool(self._auto_var.get()),
+            "refresh_interval": int(self._refresh_var.get()),
+            "confirm_before_delete": bool(self._confirm_var.get()),
+        })
 
         try:
             save_config(self._config)
@@ -309,22 +245,7 @@ class SettingsPage(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("保存失败", str(e))
 
-    def _update_scale_label(self):
-        """实时更新字体缩放标签（同步到 ThemeColors）"""
-        val = self._scale_var.get()
-        self._scale_label.configure(text=f"{val:.1f}x")
-        from .theme import ThemeColors
-        ThemeColors.set_font_scale(float(val))
-        # 刷新所有 Canvas 组件
-        if self._app:
-            self._app._refresh_all_canvas()
-
-    def _update_refresh_label(self):
-        """实时更新刷新间隔标签"""
-        self._refresh_label.configure(text=f"{self._refresh_var.get()}秒")
-
-    def update_labels(self):
-        """更新所有滑块对应的标签文本（供外部调用）。"""
-        self._update_scale_label()
-        self._opacity_label.configure(text=f"{int(self._opacity_var.get()*100)}%")
-        self._update_refresh_label()
+    def refresh_theme(self):
+        """主题切换时重绘。"""
+        self._canvas.set_bg_color(ThemeColors.get("bg"))
+        self._canvas.render()

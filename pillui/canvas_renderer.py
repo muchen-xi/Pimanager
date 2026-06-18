@@ -55,6 +55,10 @@ class BaseComponent:
         """鼠标离开组件区域。"""
         pass
 
+    def on_drag(self, event):
+        """鼠标拖拽中（B1-Motion）。"""
+        pass
+
     def on_mousewheel(self, event):
         """鼠标滚轮。"""
         pass
@@ -117,6 +121,7 @@ class PageCanvas(tk.Canvas):
 
         # 绑定事件
         self.bind("<Button-1>", self._on_click)
+        self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
         self.bind("<Motion>", self._on_motion)
         self.bind("<MouseWheel>", self._on_mousewheel)
@@ -214,6 +219,13 @@ class PageCanvas(tk.Canvas):
             if comp.visible and comp.hit_test(event.x, event.y):
                 comp.on_click(event)
                 return
+
+    def _on_drag(self, event):
+        """鼠标拖拽 — 交给当前 hover 的组件。"""
+        if self._hovered:
+            comp = self._components.get(self._hovered)
+            if comp:
+                comp.on_drag(event)
 
     def _on_release(self, event):
         """左键释放 — 交给当前 hover 的组件。"""
