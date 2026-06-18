@@ -197,7 +197,10 @@ class SettingsPage(tk.Frame):
         self._scale_pct.set_text(f"{val:.1f}x")
         ThemeColors.set_font_scale(float(val))
         if self._app:
-            self._app.refresh_all_canvases()
+            # 防抖 100ms，避免拖拽时频繁全量渲染导致卡死
+            if hasattr(self, '_scale_debounce_id') and self._scale_debounce_id:
+                self.after_cancel(self._scale_debounce_id)
+            self._scale_debounce_id = self.after(100, self._app.refresh_all_canvases)
 
     def _on_opacity_change(self, val: float):
         self._opacity_pct.set_text(f"{int(val * 100)}%")

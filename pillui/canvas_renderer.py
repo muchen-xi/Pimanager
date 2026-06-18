@@ -118,6 +118,7 @@ class PageCanvas(tk.Canvas):
 
         # 字体缩放
         self._font_scale: float = 1.0
+        self._idle_id = None  # after_idle 令牌，用于取消待执行的渲染
 
         # 绑定事件
         self.bind("<Button-1>", self._on_click)
@@ -173,18 +174,25 @@ class PageCanvas(tk.Canvas):
     # ========== 渲染 ==========
 
     def mark_dirty(self):
-        """标记需要重绘。在下一个 idle 周期执行。"""
+        """标记需要重绘。取消前一个待执行 idle，避免堆积。"""
+        if self._idle_id is not None:
+            self.after_cancel(self._idle_id)
+            self._idle_id = None
         if not self._dirty:
             self._dirty = True
-            self.after_idle(self.render)
+        self._idle_id = self.after_idle(self.render)
 
     def render(self):
         """合成所有组件 → 显示到 Canvas。"""
         self._dirty = False
+        self._idle_id = None
 
         cw = self.winfo_width()
         ch = self.winfo_height()
         if cw < 20 or ch < 20:
+            # Canvas 尚未就绪 → 重新标记脏，100ms 后重试
+            self._dirty = True
+            self._idle_id = self.after(100, self.render)
             return
 
         # Layer 0: 背景
