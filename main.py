@@ -1,5 +1,5 @@
 """
-PiManager - 轻量级树莓派 Zero W 桌面管理器
+PiManager - 轻量级树莓派 Zero W 桌面管理器 (v2: tkinter + Pillow)
 入口文件
 """
 import sys
@@ -8,15 +8,14 @@ import os
 # 确保项目根目录在路径中
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import customtkinter as ctk
+from pimanager.theme import ThemeColors
 from pimanager.app import PiManagerApp
 
 
 def main():
-    # 外观设置
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("green")
-    ctk.set_widget_scaling(1.0)
+    # 初始化主题
+    ThemeColors.set_mode("dark")
+    ThemeColors.set_font_scale(1.0)
 
     # 启动应用
     app = PiManagerApp()

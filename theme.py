@@ -1,12 +1,12 @@
 """
-PiManager 主题颜色系统 — 深色/浅色自动切换
-所有 Canvas 渲染组件通过 ThemeColors.get(key) 获取颜色
+PiManager 主题颜色系统 — 深色/浅色自动切换 (v2: 去 CTk 依赖)
+所有组件通过 ThemeColors.get(key) 获取颜色
 """
-import customtkinter as ctk
 
 
 class ThemeColors:
     """统一颜色令牌 — 深色/浅色自动切换。"""
+    _mode: str = "Dark"  # "Dark" | "Light"
 
     _dark = {
         "bg": "#0D1117",
@@ -83,11 +83,22 @@ class ThemeColors:
     @classmethod
     def _current(cls) -> dict:
         """获取当前主题的颜色映射。"""
-        try:
-            mode = ctk.get_appearance_mode()
-        except Exception:
-            mode = "Dark"
-        return cls._dark if mode == "Dark" else cls._light
+        return cls._dark if cls._mode == "Dark" else cls._light
+
+    @classmethod
+    def set_mode(cls, mode: str):
+        """设置主题模式: 'dark' 或 'light'。"""
+        cls._mode = "Dark" if mode.lower() == "dark" else "Light"
+
+    @classmethod
+    def get_mode(cls) -> str:
+        """获取当前主题模式。"""
+        return cls._mode
+
+    @classmethod
+    def toggle_mode(cls):
+        """切换主题。"""
+        cls.set_mode("dark" if cls._mode == "Light" else "dark")
 
     # 字体缩放因子（由 SettingsPage / app 设置）
     _font_scale: float = 1.0
