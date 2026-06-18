@@ -12,3 +12,6 @@ from .label import PillowLabel
 from .button import PillowButton
 from .progress_bar import PillowProgressBar
 from .card import PillowCard
+from .slider import PillowSlider
+from .checkbox import PillowCheckBox
+from .option_menu import PillowOptionMenu
