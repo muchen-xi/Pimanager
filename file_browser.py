@@ -2,7 +2,7 @@
 PiManager 文件管理 v3 — tkinter + Canvas + 双栏模式 + 进度 + 运行
 """
 import tkinter as tk
-from tkinter import filedialog, messagebox, Menu
+from tkinter import ttk, filedialog, messagebox, Menu
 import threading
 import shlex
 import os
@@ -282,7 +282,7 @@ class FileBrowser(tk.Frame):
         bar.grid(row=2, column=0, sticky="ew")
         bar.grid_propagate(False)
 
-        self._progress = tk.ttk.Progressbar(bar, mode="determinate", length=200)
+        self._progress = ttk.Progressbar(bar, mode="determinate", length=200)
         self._status_label = tk.Label(bar, text="", bg=ThemeColors.get("bg_card"),
                                       fg=ThemeColors.get("text_secondary"),
                                       font=("Segoe UI", 9))
@@ -425,10 +425,10 @@ class FileBrowser(tk.Frame):
 
         # 优先推送到终端页
         if self._app and hasattr(self._app, '_terminal_page'):
+            tp = self._app._terminal_page
             self._app._show_page("terminal")
-            self._app._terminal_page._add_session(f"运行: {name[:12]}")
-            tab = self._app._terminal_page._tabs.get(
-                self._app._terminal_page._active_idx)
+            tp._add_session(f"运行: {name[:12]}")
+            tab = tp._active_tab()
             if tab:
                 tab._entry.delete(0, "end")
                 tab._entry.insert(0, cmd)
