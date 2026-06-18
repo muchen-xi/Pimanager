@@ -411,27 +411,34 @@ class TerminalPage(tk.Frame):
 
     def _switch_tab(self, idx: int):
         self._active_idx = idx
-        for i, tab in self._tabs.items():
-            if i == self._active_idx:
+        target_key = self._sessions[idx].index if idx < len(self._sessions) else idx
+        for key, tab in self._tabs.items():
+            if key == target_key:
                 tab.grid(row=2, column=0, sticky="nsew")
             else:
                 tab.grid_remove()
         self._rebuild_tab_buttons()
 
+    def _active_tab(self):
+        """获取当前激活的 TerminalTab。"""
+        if 0 <= self._active_idx < len(self._sessions):
+            return self._tabs.get(self._sessions[self._active_idx].index)
+        return None
+
     def _run_quick(self, cmd: str):
-        tab = self._tabs.get(self._active_idx)
+        tab = self._active_tab()
         if tab:
             tab._entry.delete(0, "end")
             tab._entry.insert(0, cmd)
             tab._on_send()
 
     def _clear_active(self):
-        tab = self._tabs.get(self._active_idx)
+        tab = self._active_tab()
         if tab:
             tab._output.delete("1.0", "end")
 
     def _copy_all(self):
-        tab = self._tabs.get(self._active_idx)
+        tab = self._active_tab()
         if tab:
             text = tab._output.get("1.0", "end")
             self.clipboard_clear()
