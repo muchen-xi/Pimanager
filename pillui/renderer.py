@@ -47,7 +47,11 @@ def get_font(family: str = "msyh", size: int = 12) -> ImageFont.FreeTypeFont:
 
     for path in search_paths:
         if os.path.exists(path):
-            font = ImageFont.truetype(path, size)
+            try:
+                # .ttc 需要 index=0，.ttf 忽略 index
+                font = ImageFont.truetype(path, size, index=0)
+            except Exception:
+                font = ImageFont.truetype(path, size)
             _font_cache[cache_key] = font
             return font
 
