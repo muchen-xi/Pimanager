@@ -35,7 +35,7 @@ class _CanvasListBase(tk.Frame):
         self._canvas.bind("<Double-Button-1>", self._on_dblclick)
         self._canvas.bind("<Button-3>", self._on_rightclick)
         self._canvas.bind("<Configure>", lambda e: self._redraw())
-        BackgroundManager.register(self._canvas)
+        # 背景由 FileBrowser._list_container 统一管理，不单独注册
 
     def set_items(self, items: list):
         self._items = items
@@ -143,23 +143,34 @@ class LocalFileList(_CanvasListBase):
     def __init__(self, master, **kw):
         super().__init__(master, is_local=True, **kw)
         self.current_path = os.path.expanduser("~")
+        self._load_token = 0
         self._load()
 
     def _load(self):
-        try:
-            entries = []
-            for entry in os.scandir(self.current_path):
-                st = entry.stat()
-                entries.append({
-                    "name": entry.name,
-                    "is_dir": entry.is_dir(),
-                    "size": st.st_size if not entry.is_dir() else 0,
-                    "mtime": st.st_mtime,
-                })
-            entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
-            self.set_items(entries)
-        except Exception:
-            self.set_items([])
+        """线程安全加载本地目录。"""
+        self._load_token += 1
+        token = self._load_token
+        path = self.current_path
+
+        def _do():
+            try:
+                entries = []
+                for entry in os.scandir(path):
+                    st = entry.stat()
+                    entries.append({
+                        "name": entry.name,
+                        "is_dir": entry.is_dir(),
+                        "size": st.st_size if not entry.is_dir() else 0,
+                        "mtime": st.st_mtime,
+                    })
+                entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+                if self._load_token == token:
+                    self.after(0, lambda: self.set_items(entries))
+            except Exception:
+                if self._load_token == token:
+                    self.after(0, lambda: self.set_items([]))
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def navigate(self, path: str):
         if os.path.isdir(path):
@@ -247,6 +258,9 @@ class FileBrowser(tk.Frame):
         self._list_container.grid_columnconfigure(1, weight=0)
         self._list_container.grid_rowconfigure(0, weight=1)
 
+        # 容器统一注册背景（避免双栏各画一张重叠的背景图）
+        BackgroundManager.register(self._list_container)
+
         # 远程列表
         self._file_list = CanvasFileList(self._list_container)
         self._file_list.grid(row=0, column=0, sticky="nsew")
@@ -266,7 +280,10 @@ class FileBrowser(tk.Frame):
             self._local_list.grid(row=0, column=1, sticky="nsew")
             self._btn_to_local.pack(side="left", padx=2, pady=4)
             self._btn_to_remote.pack(side="left", padx=2, pady=4)
-            self._local_list.navigate(self._local_path)
+            # 强制几何更新，让 Canvas 拿到真实宽度后再加载
+            self._list_container.update_idletasks()
+            self._local_list.navigate(self._local_list.current_path)
+            self.after(50, lambda: (self._local_list._redraw(), self._file_list._redraw()))
         else:
             self._mode = "single"
             self._btn_mode.configure(text="双栏", bg="#1E3A5A")
@@ -274,6 +291,7 @@ class FileBrowser(tk.Frame):
             self._local_list.grid_remove()
             self._btn_to_local.pack_forget()
             self._btn_to_remote.pack_forget()
+            self.after(50, self._file_list._redraw)
 
     # ===== 状态栏 =====
 
@@ -322,9 +340,8 @@ class FileBrowser(tk.Frame):
 
     def _on_local_dblclick(self, item, idx):
         if item.get("is_dir"):
-            self._local_list.navigate(
-                os.path.join(self._local_path, item["name"]))
-            self._local_path = self._local_list.current_path
+            new_path = os.path.join(self._local_list.current_path, item["name"])
+            self._local_list.navigate(new_path)
 
     def _on_local_rightclick(self, item, idx, event):
         menu = Menu(self, tearoff=0)
@@ -367,7 +384,7 @@ class FileBrowser(tk.Frame):
         if not sel:
             return
         self._do_transfer("download", f"{self._cwd}/{sel['name']}",
-                          os.path.join(self._local_path, sel['name']))
+                          os.path.join(self._local_list.current_path, sel['name']))
 
     def _upload_from_local(self):
         if not self._ssh.connected or self._mode != "dual":
@@ -375,7 +392,7 @@ class FileBrowser(tk.Frame):
         sel = self._local_list.get_selected()
         if not sel:
             return
-        local = os.path.join(self._local_path, sel['name'])
+        local = os.path.join(self._local_list.current_path, sel['name'])
         self._do_transfer("upload", local, f"{self._cwd}/{sel['name']}")
 
     def _do_transfer(self, direction: str, src: str, dst: str):

@@ -168,6 +168,7 @@ class TerminalTab(tk.Frame):
         self._running = False
         self._stream_handle = None
         self._stream_var = tk.BooleanVar(value=False)
+        self._exec_generation = 0
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -189,6 +190,25 @@ class TerminalTab(tk.Frame):
                 fg=ThemeColors.get("accent"), font=("Microsoft YaHei", 11)).pack(
             side="left", padx=(6, 0))
 
+        # 右侧按钮先 pack（防挤）
+        tk.Button(input_frame, text="清屏",
+                 command=lambda: self._output.delete("1.0", "end"),
+                 bg="#333333", fg="white", relief="flat",
+                 font=("Segoe UI", 10), padx=8).pack(side="right", padx=2, pady=2)
+
+        self._btn_send = tk.Button(input_frame, text="发送",
+                                   command=self._on_send,
+                                   bg="#2B5B2B", fg="white", relief="flat",
+                                   font=("Segoe UI", 10), padx=8)
+        self._btn_send.pack(side="right", padx=4, pady=2)
+
+        self._btn_stream = tk.Button(input_frame, text="流式:关",
+                                     command=self._toggle_stream,
+                                     bg="#333333", fg="white", relief="flat",
+                                     font=("Segoe UI", 8), padx=4)
+        self._btn_stream.pack(side="right", padx=2, pady=2)
+
+        # Entry 最后 pack（吃剩余空间）
         self._entry = tk.Entry(input_frame, bg=ThemeColors.get("bg_card"),
                                fg=ThemeColors.get("text"),
                                insertbackground=ThemeColors.get("text"),
@@ -199,16 +219,13 @@ class TerminalTab(tk.Frame):
         self._entry.bind("<Down>", self._on_down)
         self._entry.bind("<Control-c>", self._on_ctrl_c)
 
-        self._btn_send = tk.Button(input_frame, text="发送",
-                                   command=self._on_send,
-                                   bg="#2B5B2B", fg="white", relief="flat",
-                                   font=("Segoe UI", 10), padx=8)
-        self._btn_send.pack(side="right", padx=4, pady=2)
-
-        tk.Button(input_frame, text="清屏",
-                 command=lambda: self._output.delete("1.0", "end"),
-                 bg="#333333", fg="white", relief="flat",
-                 font=("Segoe UI", 10), padx=8).pack(side="right", padx=2, pady=2)
+    def _toggle_stream(self):
+        current = self._stream_var.get()
+        self._stream_var.set(not current)
+        if self._stream_var.get():
+            self._btn_stream.configure(text="流式:开", bg="#2B5B2B")
+        else:
+            self._btn_stream.configure(text="流式:关", bg="#333333")
 
     def _on_enter(self, event):
         self._on_send()
@@ -255,6 +272,8 @@ class TerminalTab(tk.Frame):
 
     def _exec_blocking(self, cmd: str):
         self._running = True
+        self._exec_generation += 1
+        gen = self._exec_generation
         self._btn_send.configure(text="...", state="disabled")
 
         def _do():
@@ -267,12 +286,14 @@ class TerminalTab(tk.Frame):
                     self.after(0, lambda l=line: self._output.insert("end", l + "\n", "stderr"))
             if ec != 0:
                 self.after(0, lambda: self._output.insert("end", f"[exit: {ec}]\n", "stderr"))
-            self.after(0, self._finish_streaming)
+            self.after(0, lambda: self._finish_streaming(gen))
 
         threading.Thread(target=_do, daemon=True).start()
 
     def _exec_streaming(self, cmd: str):
         self._running = True
+        self._exec_generation += 1
+        gen = self._exec_generation
         self._stream_handle = None
         self._btn_send.configure(text="停止", bg="#8B0000")
 
@@ -287,12 +308,12 @@ class TerminalTab(tk.Frame):
                 self.after(0, lambda: self._output.insert("end", f"错误: {error}\n", "stderr"))
             if exit_code != 0:
                 self.after(0, lambda: self._output.insert("end", f"[exit: {exit_code}]\n", "stderr"))
-            self.after(0, self._finish_streaming)
+            self.after(0, lambda: self._finish_streaming(gen))
 
         def _stream():
             handle = self._ssh.exec_command_streaming(
                 cmd, on_stdout, on_stderr, on_done, timeout=120)
-            self.after(0, lambda h=handle: setattr(self, '_stream_handle', h))
+            self._stream_handle = handle  # 同步赋值，避免竞态
 
         threading.Thread(target=_stream, daemon=True).start()
 
@@ -308,11 +329,12 @@ class TerminalTab(tk.Frame):
             self._output.insert("end", "进程未响应，已强制关闭\n", "stderr")
         self._finish_streaming()
 
-    def _finish_streaming(self):
+    def _finish_streaming(self, generation=None):
+        if generation is not None and generation != self._exec_generation:
+            return  # 过时回调，忽略
         self._running = False
         self._stream_handle = None
         self._btn_send.configure(text="发送", bg="#2B5B2B", state="normal")
-        self._entry.configure(state="normal")
 
     def focus_input(self):
         self._entry.focus_set()
