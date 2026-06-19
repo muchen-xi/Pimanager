@@ -7,7 +7,7 @@ import os
 import tempfile
 from unittest.mock import MagicMock, patch, Mock
 
-# 项目根目录的父目录 (C:\\Users\\m2008\\Desktop)
+# 项目根目录的父目录
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 

@@ -1007,9 +1007,9 @@ font = ThemeColors.scaled_font('Segoe UI', 10)  # 返回缩放后的元组
     'connections': [
         {
             'name': "树莓派 Zero W",
-            'host': 'muchenxi-20081128.local',
+            'host': 'raspberrypi.local',
             'port': 22,
-            'username': 'chenxi',
+            'username': 'pi',
             'key_path': '~/.ssh/id_ed25519',
             'use_key': True,
         }

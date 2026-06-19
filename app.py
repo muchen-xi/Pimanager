@@ -775,9 +775,9 @@ class PiManagerApp(tk.Tk):
 
         fields = [
             ("连接名称:", "name", conn.get("name", "树莓派")),
-            ("主机地址:", "host", conn.get("host", "muchenxi-20081128.local")),
+            ("主机地址:", "host", conn.get("host", "raspberrypi.local")),
             ("端口:", "port", str(conn.get("port", 22))),
-            ("用户名:", "username", conn.get("username", "chenxi")),
+            ("用户名:", "username", conn.get("username", "pi")),
         ]
 
         entries = {}

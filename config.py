@@ -19,9 +19,9 @@ DEFAULT_CONFIG = {
     'connections': [
         {
             'name': "树莓派 Zero W",
-            'host': 'muchenxi-20081128.local',
+            'host': 'raspberrypi.local',
             'port': 22,
-            'username': 'chenxi',
+            'username': 'pi',
             'key_path': str(Path.home() / '.ssh' / 'id_ed25519'),
             'use_key': True,
             'auto_rediscover': False,
