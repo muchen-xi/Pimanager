@@ -1,6 +1,6 @@
 # 🥧 PiManager - 树莓派 Zero W 轻量管理器
 
-一个基于 Python + tkinter + Pillow 的本地桌面 SSH 管理工具，专为树莓派 Zero W 设计。v2.1.0 修复 37 个 bug，主题动态化 + 文字渲染修复 + 背景 fit 模式。
+一个基于 Python + tkinter + Pillow 的本地桌面 SSH 管理工具，专为树莓派 Zero W 设计。v2.1.1 修复 37 个 bug + 2 个紧急修复，主题动态化 + 文字渲染修复 + 背景 fit 模式。
 
 ## ✨ 功能
 
@@ -47,7 +47,7 @@ ssh-copy-id chenxi@muchenxi-20081128.local
 python -m pimanager.main
 ```
 
-## 🔥 v2.1.0 更新亮点
+## 🔥 v2.1.1 更新亮点
 
 - **主题系统重构**：所有组件动态读取 ThemeColors，亮色模式完美运行，支持绿/蓝/深蓝三色强调
 - **文字渲染修复**：消除暗色光晕，字体缩放全局生效，60fps hover 反馈
@@ -104,7 +104,7 @@ pimanager/
 ## 🖥️ 技术栈
 
 - **Python 3.9+**
-- **tkinter + pillui** — 纯 Pillow Canvas 渲染引擎 (v2.1.0)
+- **tkinter + pillui** — 纯 Pillow Canvas 渲染引擎 (v2.1.1)
 - **Paramiko** — SSH/SFTP 协议
 - **Pillow** — 图层合成 + 字体渲染
 

@@ -36,9 +36,9 @@ class StatusPanel(tk.Frame):
         c = self._canvas
 
         # ---- 系统信息卡片 ----
-        c.add("info_card", PillowCard(10, 10, 540, 70, title="🖥️ 系统信息",
-                                      fill="#161B22", border="gray30"))
-        self._lbl_hostname = PillowLabel("🔴 未连接", 24, 38, 250, 24,
+        c.add("info_card", PillowCard(10, 10, 540, 70, title="系统信息",
+                                      fill="#161B22", border="#4D4D4D"))
+        self._lbl_hostname = PillowLabel("未连接", 24, 38, 250, 24,
                                          font_size=16, weight="bold",
                                          color="#C9D1D9")
         c.add("hostname", self._lbl_hostname)
@@ -50,8 +50,8 @@ class StatusPanel(tk.Frame):
         c.add("kernel", self._lbl_kernel)
 
         # ---- CPU 卡片 ----
-        c.add("cpu_card", PillowCard(10, 90, 265, 100, title="🔥 CPU",
-                                     fill="#161B22", border="gray30"))
+        c.add("cpu_card", PillowCard(10, 90, 265, 100, title="CPU",
+                                     fill="#161B22", border="#4D4D4D"))
         self._cpu_bar = PillowProgressBar(24, 125, 220, 16)
         c.add("cpu_bar", self._cpu_bar)
         self._cpu_pct = PillowLabel("--%", 180, 108, 80, 28,
@@ -60,16 +60,16 @@ class StatusPanel(tk.Frame):
         c.add("cpu_pct", self._cpu_pct)
 
         # ---- 温度卡片 ----
-        c.add("temp_card", PillowCard(285, 90, 265, 100, title="🌡️ 温度",
-                                      fill="#161B22", border="gray30"))
+        c.add("temp_card", PillowCard(285, 90, 265, 100, title="温度",
+                                      fill="#161B22", border="#4D4D4D"))
         self._temp_label = PillowLabel("--°C", 180, 108, 80, 28,
                                        font_size=26, weight="bold",
                                        color="#8B949E", align="right")
         c.add("temp", self._temp_label)
 
         # ---- 内存卡片 ----
-        c.add("mem_card", PillowCard(10, 200, 265, 100, title="🧠 内存",
-                                     fill="#161B22", border="gray30"))
+        c.add("mem_card", PillowCard(10, 200, 265, 100, title="内存",
+                                     fill="#161B22", border="#4D4D4D"))
         self._mem_bar = PillowProgressBar(24, 235, 220, 16)
         c.add("mem_bar", self._mem_bar)
         self._mem_text = PillowLabel("-- / -- MB", 24, 215, 220, 20,
@@ -77,8 +77,8 @@ class StatusPanel(tk.Frame):
         c.add("mem_text", self._mem_text)
 
         # ---- 磁盘卡片 ----
-        c.add("disk_card", PillowCard(285, 200, 265, 100, title="💾 磁盘",
-                                      fill="#161B22", border="gray30"))
+        c.add("disk_card", PillowCard(285, 200, 265, 100, title="磁盘",
+                                      fill="#161B22", border="#4D4D4D"))
         self._disk_bar = PillowProgressBar(24, 235, 220, 16)
         c.add("disk_bar", self._disk_bar)
         self._disk_text = PillowLabel("-- / -- MB", 24, 215, 220, 20,
@@ -86,16 +86,16 @@ class StatusPanel(tk.Frame):
         c.add("disk_text", self._disk_text)
 
         # ---- 运行信息 ----
-        c.add("info2_card", PillowCard(10, 310, 540, 50, fill="#161B22", border="gray30"))
-        self._lbl_uptime = PillowLabel("⏱ 运行时间: --", 24, 322, 250, 22,
+        c.add("info2_card", PillowCard(10, 310, 540, 50, fill="#161B22", border="#4D4D4D"))
+        self._lbl_uptime = PillowLabel("运行时间: --", 24, 322, 250, 22,
                                        font_size=12, color="#C9D1D9")
         c.add("uptime", self._lbl_uptime)
-        self._lbl_load = PillowLabel("📊 负载: --", 290, 322, 250, 22,
+        self._lbl_load = PillowLabel("负载: --", 290, 322, 250, 22,
                                      font_size=12, color="#C9D1D9")
         c.add("load", self._lbl_load)
 
         # ---- 刷新按钮 ----
-        self._btn_refresh = PillowButton("🔄 刷新", 440, 380, 110, 34,
+        self._btn_refresh = PillowButton("刷新", 440, 380, 110, 34,
                                         command=self.refresh, font_size=12)
         c.add("btn_refresh", self._btn_refresh)
         self._lbl_update = PillowLabel("", 10, 385, 420, 24,
@@ -128,7 +128,7 @@ class StatusPanel(tk.Frame):
         c = self._canvas
 
         # 主机信息
-        self._lbl_hostname.set_text(f"🖥️ {s.get('hostname', '?')}")
+        self._lbl_hostname.set_text(f"{s.get('hostname', '?')}")
         self._lbl_os.set_text(s.get('os_version', ''))
         self._lbl_kernel.set_text(f"Linux {s.get('kernel', '')}")
 
@@ -166,8 +166,8 @@ class StatusPanel(tk.Frame):
             self._disk_text.set_text(f"{disk_used} / {disk_total} MB")
 
         # 运行信息
-        self._lbl_uptime.set_text(f"⏱ 运行时间: {s.get('uptime', '--')}")
-        self._lbl_load.set_text(f"📊 负载: {s.get('load_avg', '--')}")
+        self._lbl_uptime.set_text(f"运行时间: {s.get('uptime', '--')}")
+        self._lbl_load.set_text(f"负载: {s.get('load_avg', '--')}")
 
         # 时间戳
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -181,7 +181,7 @@ class StatusPanel(tk.Frame):
             bar.set_color(ok if pct < 50 else (warn if pct < 80 else danger))
 
     def _show_disconnected(self):
-        self._lbl_hostname.set_text("🔴 未连接")
+        self._lbl_hostname.set_text("未连接")
         self._lbl_os.set_text("请先连接到树莓派")
         self._lbl_kernel.set_text("")
         self._cpu_bar.set(0)
@@ -192,8 +192,8 @@ class StatusPanel(tk.Frame):
         self._mem_text.set_text("-- / -- MB")
         self._disk_bar.set(0)
         self._disk_text.set_text("-- / -- MB")
-        self._lbl_uptime.set_text("⏱ 运行时间: --")
-        self._lbl_load.set_text("📊 负载: --")
+        self._lbl_uptime.set_text("运行时间: --")
+        self._lbl_load.set_text("负载: --")
         self._lbl_update.set_text("")
 
     def refresh_theme(self):

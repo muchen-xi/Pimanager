@@ -422,7 +422,7 @@ class TestPillowCard(unittest.TestCase):
         """卡片默认填充和边框色。"""
         card = PillowCard()
         self.assertEqual(card.fill_color, '#161B22')
-        self.assertEqual(card.border_color, 'gray35')
+        self.assertEqual(card.border_color, '#4D4D4D')
 
     def test_card_custom_colors(self):
         """自定义填充和边框色。"""
