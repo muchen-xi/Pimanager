@@ -6,7 +6,7 @@ import unittest
 import sys
 import os
 
-# 确保项目根目录在路径中
+# 测试入口：将项目根目录加入 sys.path，使 pimanager 包可导入
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 if __name__ == '__main__':

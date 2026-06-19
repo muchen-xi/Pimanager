@@ -9,9 +9,7 @@ import copy
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from config import (
+from pimanager.config import (
     _deep_merge, DEFAULT_CONFIG, CONFIG_VERSION,
     validate_config, load_config, save_config, backup_config,
     restore_config, reset_to_defaults
@@ -106,7 +104,7 @@ class TestConfigMigration(unittest.TestCase):
 
     def test_merge_preserves_new_defaults(self):
         """合并应确保新默认字段被添加。"""
-        from config import _migrate_and_merge
+        from pimanager.config import _migrate_and_merge
         old = {'version': 1, 'connections': [{'host': 'test', 'port': 22}]}
         merged = _migrate_and_merge(old)
         # behavior 是 V2 新增的
@@ -123,7 +121,7 @@ class TestConfigMigration(unittest.TestCase):
 
     def test_merge_overrides_none_with_default(self):
         """用户值覆盖默认值，缺失字段用默认值补全。"""
-        from config import _migrate_and_merge
+        from pimanager.config import _migrate_and_merge
         old = {'version': 2, 'appearance': {'theme': 'light'}}
         merged = _migrate_and_merge(old)
         self.assertEqual(merged['appearance']['theme'], 'light')
@@ -135,7 +133,7 @@ class TestConfigBackup(unittest.TestCase):
     """测试配置备份和恢复"""
 
     def setUp(self):
-        import config as cfg_module
+        import pimanager.config as cfg_module
         self._orig_file = cfg_module.CONFIG_FILE
         self._orig_backup = cfg_module.CONFIG_BACKUP_DIR
         # 使用临时目录
@@ -144,7 +142,7 @@ class TestConfigBackup(unittest.TestCase):
         cfg_module.CONFIG_BACKUP_DIR = Path(self._tmp.name) / 'backups'
 
     def tearDown(self):
-        import config as cfg_module
+        import pimanager.config as cfg_module
         cfg_module.CONFIG_FILE = self._orig_file
         cfg_module.CONFIG_BACKUP_DIR = self._orig_backup
         self._tmp.cleanup()

@@ -25,7 +25,7 @@
 
 ### IP漂移修复
 - 修复：主机名被解析后的 IP 覆盖，漂移修复只生效一次 — 新增 `_original_hostname` 永久保留原始主机名
-- 修复：Keep-alive 从未启动 — 连接成功后调用 `start_keep_alive()`
+- 修复：Keep-alive 从未启动 — `app.py` 的 `_do_connect()` 连接成功后调用 `start_keep_alive()`
 - 修复：自动重连耗尽后 UI 仍显示"已连接" — `_do_sidebar_refresh()` 检测断连并更新 UI
 - 修复：Keep-alive 双重调用 `_auto_reconnect()` 浪费重试配额
 

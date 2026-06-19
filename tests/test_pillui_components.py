@@ -8,16 +8,14 @@ import os
 import tkinter as tk
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from pillui.canvas_renderer import BaseComponent, PageCanvas
-from pillui.button import PillowButton
-from pillui.label import PillowLabel
-from pillui.progress_bar import PillowProgressBar
-from pillui.card import PillowCard
-from pillui.checkbox import PillowCheckBox
-from pillui.slider import PillowSlider
-from pillui.option_menu import PillowOptionMenu
+from pimanager.pillui.canvas_renderer import BaseComponent, PageCanvas
+from pimanager.pillui.button import PillowButton
+from pimanager.pillui.label import PillowLabel
+from pimanager.pillui.progress_bar import PillowProgressBar
+from pimanager.pillui.card import PillowCard
+from pimanager.pillui.checkbox import PillowCheckBox
+from pimanager.pillui.slider import PillowSlider
+from pimanager.pillui.option_menu import PillowOptionMenu
 
 # 全局 Tk 根窗口，供 tkinter Variable 使用（隐藏窗口）
 _tk_root = None

@@ -5,9 +5,7 @@ import unittest
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from theme import ThemeColors
+from pimanager.theme import ThemeColors
 
 
 class TestThemeModeToggle(unittest.TestCase):

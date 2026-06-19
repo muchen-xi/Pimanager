@@ -5,10 +5,6 @@ import unittest
 import sys
 import os
 
-# 项目根目录的父目录
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
-
 from pimanager.terminal_page import TerminalSession
 
 

@@ -2,12 +2,8 @@
 PiManager - 轻量级树莓派 Zero W 桌面管理器 (v2: tkinter + Pillow)
 入口文件
 """
-import sys
 import os
 import json
-
-# 确保项目根目录在路径中
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pimanager.theme import ThemeColors
 from pimanager.app import PiManagerApp
