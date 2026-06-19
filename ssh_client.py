@@ -231,7 +231,8 @@ class SSHClient:
     def _auto_reconnect(self):
         """自动重连（带退避策略 + IP漂移检测）。"""
         if self._reconnect_attempts >= self._max_reconnect_attempts:
-            print(f"已达最大重连次数 ({self._max_reconnect_attempts})")
+            print(f"已达最大重连次数 ({self._max_reconnect_attempts})，连接已断开")
+            self._connected = False
             return False
         self._reconnect_attempts += 1
 
@@ -274,21 +275,7 @@ class SSHClient:
                 return exit_code, out, err
             except paramiko.SSHException as e:
                 print(f"命令执行失败 (SSH错误): {e}")
-                # 尝试自动重连
-                if self._auto_reconnect():
-                    # 重试一次
-                    try:
-                        stdin, stdout, stderr = self._client.exec_command(
-                            command, timeout=timeout)
-                        exit_code = stdout.channel.recv_exit_status()
-                        out = stdout.read().decode('utf-8', errors='replace')
-                        err = stderr.read().decode('utf-8', errors='replace')
-                        return exit_code, out, err
-                    except Exception as e2:
-                        return -1, '', f"重连后执行失败: {str(e2)}"
-                else:
-                    self._connected = False
-                    return -1, '', f"连接已断开，重连失败: {str(e)}"
+                return -1, '', f"SSH错误: {str(e)}"
             except Exception as e:
                 return -1, '', str(e)
 
@@ -376,16 +363,27 @@ class SSHClient:
         self._do_keep_alive(interval)
 
     def _do_keep_alive(self, interval):
-        """执行保活检测。exec_command() 内部已处理 SSHException→自动重连，
-        此处只做探测，不重复调用 _auto_reconnect() 避免浪费重试配额。"""
+        """执行保活检测。连续失败 2 次才触发重连，避免瞬态超时误杀连接。"""
         if not self._connected:
             return
         try:
             code, _, _ = self.exec_command('echo "keepalive"', timeout=5)
             if code != 0:
-                print("保活检测失败")
+                self._ka_fail_count = getattr(self, '_ka_fail_count', 0) + 1
+                print(f"保活检测失败 ({self._ka_fail_count}/2)")
+                if self._ka_fail_count >= 2:
+                    print("保活连续失败，尝试重连...")
+                    self._auto_reconnect()
+                    self._ka_fail_count = 0
+            else:
+                self._ka_fail_count = 0
         except Exception as e:
-            print(f"保活检测异常: {e}")
+            self._ka_fail_count = getattr(self, '_ka_fail_count', 0) + 1
+            print(f"保活检测异常 ({self._ka_fail_count}/2): {e}")
+            if self._ka_fail_count >= 2:
+                print("保活连续异常，尝试重连...")
+                self._auto_reconnect()
+                self._ka_fail_count = 0
         # 使用 threading.Timer 而非 after（因为这是非 GUI 模块）
         self._keep_alive_job = threading.Timer(interval, self._do_keep_alive, [interval])
         self._keep_alive_job.daemon = True
