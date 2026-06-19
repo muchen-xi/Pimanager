@@ -131,6 +131,50 @@ class BackgroundManager:
             print(f"apply_to_canvas 异常: {e}")
 
     @classmethod
+    def apply_to_canvas_positioned(cls, canvas, container_size, offset):
+        """位置感知背景应用 — 双栏文件管理用"""
+        if cls._blended is None:
+            return
+        try:
+            cw = canvas.winfo_width()
+            ch = canvas.winfo_height()
+            cont_w, cont_h = container_size
+            off_x, off_y = offset
+
+            if cw < 20 or ch < 20 or cont_w < 20 or cont_h < 20:
+                return
+
+            # 背景图适配到容器尺寸
+            from .pillui.image_utils import fit_image
+            from .theme import ThemeColors
+            container_img = fit_image(cls._blended, cont_w, cont_h, cls._fit_mode)
+
+            # 裁剪出本 Canvas 的可视区域
+            left = max(0, off_x)
+            top = max(0, off_y)
+            right = min(cont_w, off_x + cw)
+            bottom = min(cont_h, off_y + ch)
+            region = container_img.crop((left, top, right, bottom))
+
+            # 不足区域用主题背景色填充
+            if region.size != (cw, ch):
+                bg_hex = ThemeColors.get("bg")
+                bg_rgb = tuple(int(bg_hex[i:i+2], 16) for i in (1, 3, 5))
+                padded = Image.new("RGBA", (cw, ch), (*bg_rgb, 255))
+                paste_x = max(0, -off_x)
+                paste_y = max(0, -off_y)
+                padded.paste(region, (paste_x, paste_y))
+                region = padded
+
+            tk_img = ImageTk.PhotoImage(region)
+            cls._tk_images[id(canvas)] = tk_img
+            canvas.delete("bg_image")
+            canvas.create_image(0, 0, anchor="nw", image=tk_img, tags="bg_image")
+            canvas.tag_lower("bg_image")
+        except Exception as e:
+            print(f"apply_to_canvas_positioned 异常: {e}")
+
+    @classmethod
     def _refresh(cls):
         for c in cls._canvases:
             try:
@@ -566,6 +610,7 @@ class PiManagerApp(tk.Tk):
 
             self._reboot_btn.set_disabled(False)
             self._shutdown_btn.set_disabled(False)
+            self._ssh.start_keep_alive()
             self._refresh_sidebar_stats()
             self._start_sidebar_refresh()
 
@@ -669,7 +714,10 @@ class PiManagerApp(tk.Tk):
     def _do_sidebar_refresh(self):
         if self._ssh.connected:
             self._refresh_sidebar_stats()
-        self._sidebar_refresh_job = self.after(3000, self._do_sidebar_refresh)
+            self._sidebar_refresh_job = self.after(3000, self._do_sidebar_refresh)
+        else:
+            # 连接已丢失（自动重连失败），更新UI为断开状态
+            self._on_disconnected()
 
     def _stop_sidebar_refresh(self):
         if hasattr(self, '_sidebar_refresh_job') and self._sidebar_refresh_job:

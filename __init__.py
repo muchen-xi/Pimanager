@@ -2,7 +2,7 @@
 PiManager - 轻量级树莓派管理工具
 """
 # Copyright (c) 2026 穆洪达 (Mu Hongda)
-__version__ = '2.2.0'
+__version__ = '2.2.1'
 
 from .app import PiManagerApp, BackgroundManager
 from .theme import ThemeColors

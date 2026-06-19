@@ -71,6 +71,7 @@ class SSHClient:
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = 3
         self._auto_rediscover = False
+        self._original_hostname = ''  # 保存原始主机名，IP漂移时始终从此解析
 
     @property
     def connected(self):
@@ -173,6 +174,11 @@ class SSHClient:
             self._connected = True
             self._host = host
             self._port = port
+            # 保存原始主机名用于IP漂移检测（IP地址不覆盖）
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                self._original_hostname = host
             print(f"SSH 连接成功: {username}@{host}:{port}")
             return True, "连接成功"
 
@@ -231,7 +237,9 @@ class SSHClient:
 
         actual_host = self._host
         if self._auto_rediscover:
-            resolved, _ = self._resolve_hostname(self._host, self._port)
+            # 始终从原始主机名解析，避免_host被IP覆盖后无法再检测漂移
+            resolve_from = self._original_hostname or self._host
+            resolved, _ = self._resolve_hostname(resolve_from, self._port)
             if resolved and resolved != self._host:
                 actual_host = resolved
                 print(f"IP漂移修复 ({self._reconnect_attempts}/{self._max_reconnect_attempts}): "
@@ -368,14 +376,14 @@ class SSHClient:
         self._do_keep_alive(interval)
 
     def _do_keep_alive(self, interval):
-        """执行保活检测。"""
+        """执行保活检测。exec_command() 内部已处理 SSHException→自动重连，
+        此处只做探测，不重复调用 _auto_reconnect() 避免浪费重试配额。"""
         if not self._connected:
             return
         try:
             code, _, _ = self.exec_command('echo "keepalive"', timeout=5)
             if code != 0:
-                print("保活检测失败，尝试重连...")
-                self._auto_reconnect()
+                print("保活检测失败")
         except Exception as e:
             print(f"保活检测异常: {e}")
         # 使用 threading.Timer 而非 after（因为这是非 GUI 模块）
