@@ -1,7 +1,8 @@
 """
 PiManager - 轻量级树莓派管理工具
 """
-__version__ = "1.3.5"
+# Copyright (c) 2026 穆洪达 (Mu Hongda)
+__version__ = '2.1.0'
 
 from .app import PiManagerApp, BackgroundManager
 from .theme import ThemeColors

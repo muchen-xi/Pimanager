@@ -10,10 +10,10 @@ from .pillui import PageCanvas, PillowButton, PillowLabel, PillowProgressBar, Pi
 from .app import BackgroundManager
 
 
+# 系统状态监控 — 全 Pillow 渲染
 class StatusPanel(tk.Frame):
-    """系统状态监控 — 全 Pillow 渲染。"""
 
-    def __init__(self, master, ssh_client, config: dict = None):
+    def __init__(self, master, ssh_client, config=None):
         super().__init__(master, bg=ThemeColors.get("bg"))
         self._ssh = ssh_client
         self._config = config or {}
@@ -102,8 +102,6 @@ class StatusPanel(tk.Frame):
                                        font_size=10, color="#8B949E")
         c.add("last_update", self._lbl_update)
 
-        c.render()
-
     def refresh(self):
         """刷新状态数据。"""
         if not self._ssh.connected:
@@ -112,11 +110,18 @@ class StatusPanel(tk.Frame):
 
         def _fetch():
             status = self._ssh.get_system_status()
-            self.after(0, lambda: self._update_ui(status))
+            self.after(0, lambda: self._safe_update_ui(status))
 
         threading.Thread(target=_fetch, daemon=True).start()
 
-    def _update_ui(self, s: dict):
+    def _safe_update_ui(self, status):
+        """安全更新 UI，防止控件销毁后回调崩溃 (BUG 6)。"""
+        try:
+            self._update_ui(status)
+        except Exception:
+            pass
+
+    def _update_ui(self, s):
         if s.get("error") and not s.get("hostname"):
             return
 
@@ -192,11 +197,12 @@ class StatusPanel(tk.Frame):
         self._lbl_update.set_text("")
 
     def refresh_theme(self):
-        """主题切换时重绘。"""
+        """主题切换时重绘所有组件。"""
+        self._canvas.apply_theme()
         self._canvas.set_bg_color(ThemeColors.get("bg"))
         self._canvas.render()
 
-    def start_auto_refresh(self, interval_seconds: int = None):
+    def start_auto_refresh(self, interval_seconds=None):
         if interval_seconds is not None:
             self._refresh_interval = interval_seconds
         self.stop_auto_refresh()

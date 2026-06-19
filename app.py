@@ -1,19 +1,20 @@
 """
-PiManager 主应用窗口 (v2: tkinter + Pillow)
+PiManager 主应用窗口 v2 — tkinter + Pillow 渲染
 """
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
 import threading
 import os
-import logging
 import datetime
-from pathlib import Path
+import pathlib
 
-from .config import load_config, save_config
+from . import config
+from . import __version__
 from .ssh_client import SSHClient
 from .theme import ThemeColors
 from .pillui import PageCanvas, PillowButton, PillowLabel, PillowProgressBar, PillowCard
+from .pillui.image_utils import fit_image
 
 # 延迟导入页面（避免循环依赖）
 # StatusPanel, FileBrowser, TerminalPage, SettingsPage 在 _build_pages 中导入
@@ -23,14 +24,16 @@ from .pillui import PageCanvas, PillowButton, PillowLabel, PillowProgressBar, Pi
 #  BackgroundManager (v2: 极简版)
 # ============================================================
 
+# 全局背景管理 — 加载图片 + 与暗色混合 → Canvas 背景
 class BackgroundManager:
-    """全局背景管理 — 加载图片 + 与暗色混合 → Canvas 背景。"""
 
-    _blended: Image.Image = None
-    _opacity: float = 0.15
-    _path: str = ""
-    _canvases: list = []  # PageCanvas 或 tk.Canvas
-    _tk_images: dict = {}  # id → PhotoImage (防回收)
+    _blended = None
+    _opacity = 0.15
+    _fit_mode = 'cover'
+    _path = ""
+    _canvases = []  # PageCanvas 或 tk.Canvas
+    _tk_images = {}  # id → PhotoImage (防回收)
+    _size_cache = {}  # (size, mode) → fit_image 输出缓存
 
     @classmethod
     def register(cls, canvas):
@@ -45,7 +48,18 @@ class BackgroundManager:
             cls._tk_images.pop(id(canvas), None)
 
     @classmethod
-    def set_background(cls, path: str, opacity: float):
+    def set_fit_mode(cls, mode):
+        """
+        设置背景适配模式
+        :param mode: cover/contain/fill/tile
+        """
+        if mode in ('cover', 'contain', 'fill', 'tile'):
+            cls._fit_mode = mode
+            cls._size_cache.clear()
+            cls._refresh()
+
+    @classmethod
+    def set_background(cls, path, opacity):
         """设置背景图片。"""
         cls._path = path
         cls._opacity = float(opacity)
@@ -54,16 +68,22 @@ class BackgroundManager:
                 bg = Image.open(path)
                 bg.verify()
                 bg = Image.open(path).convert("RGBA")
-                dark = Image.new("RGBA", bg.size, (13, 17, 23, 255))
+                # 根据当前主题动态计算叠加颜色 (B3)
+                bg_hex = ThemeColors.get("bg")
+                bg_rgb = tuple(int(bg_hex[i:i+2], 16) for i in (1, 3, 5))
+                dark = Image.new("RGBA", bg.size, (*bg_rgb, 255))
                 cls._blended = Image.blend(
                     dark.convert("RGB"), bg.convert("RGB"), cls._opacity
-                )
+                ).convert('RGBA')
             except Exception as e:
-                logging.warning(f"背景加载失败: {e}")
+                print(f"背景加载失败: {e}")
                 cls._blended = None
+                cls._path = None
+                messagebox.showerror("背景加载失败", str(e))
         else:
             cls._blended = None
         cls._tk_images.clear()
+        cls._size_cache.clear()
         cls._refresh()
 
     @classmethod
@@ -71,15 +91,24 @@ class BackgroundManager:
         cls._path = ""
         cls._blended = None
         cls._tk_images.clear()
+        cls._size_cache.clear()
         cls._refresh()
 
     @classmethod
-    def get_blended(cls, size: tuple = None) -> Image.Image:
-        """返回混合后的背景图。"""
+    def get_blended(cls, size=None):
+        """
+        返回混合后的背景图
+        :param size: 目标尺寸 (width, height)，None 返回原尺寸
+        :return: PIL Image 或 None
+        """
         if cls._blended is None:
             return None
         if size:
-            return cls._blended.resize(size, Image.LANCZOS)
+            cache_key = (size, cls._fit_mode)
+            if cache_key not in cls._size_cache:
+                cls._size_cache[cache_key] = fit_image(
+                    cls._blended, size[0], size[1], cls._fit_mode)
+            return cls._size_cache[cache_key]
         return cls._blended
 
     @classmethod
@@ -92,14 +121,14 @@ class BackgroundManager:
             ch = canvas.winfo_height()
             if cw < 20 or ch < 20:
                 return
-            img = cls._blended.resize((cw, ch), Image.LANCZOS)
+            img = fit_image(cls._blended, cw, ch, cls._fit_mode)
             tk_img = ImageTk.PhotoImage(img)
             cls._tk_images[id(canvas)] = tk_img
             canvas.delete("bg_image")
             canvas.create_image(0, 0, anchor="nw", image=tk_img, tags="bg_image")
             canvas.tag_lower("bg_image")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"apply_to_canvas 异常: {e}")
 
     @classmethod
     def _refresh(cls):
@@ -108,7 +137,7 @@ class BackgroundManager:
                 if hasattr(c, 'set_bg_image') and hasattr(c, 'render'):
                     # PageCanvas
                     if cls._blended:
-                        c.set_bg_image(cls._blended)
+                        c.set_bg_image(cls._blended, cls._fit_mode)
                     else:
                         c.set_bg_color(ThemeColors.get("bg"))
                     c.render()
@@ -117,27 +146,27 @@ class BackgroundManager:
                     c.delete("bg_image")
                     if cls._blended:
                         cls.apply_to_canvas(c)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"BackgroundManager._refresh 异常: {e}")
 
 
 # ============================================================
 #  PiManagerApp
 # ============================================================
 
+# PiManager 主应用 (v2: tkinter + Pillow 渲染)
 class PiManagerApp(tk.Tk):
-    """PiManager 主应用 (v2: tkinter + Pillow 渲染)"""
 
     SIDEBAR_W = 240
 
     def __init__(self):
         super().__init__()
 
-        self._setup_logging()
-
-        self._config = load_config()
+        self._config = config.load_config()
         self._ssh = SSHClient()
         self._connect_time = None
+        self._sidebar_refresh_job = None
+        self._status_clock_job = None
 
         # 窗口设置
         self.title("PiManager - 树莓派管理器")
@@ -147,12 +176,12 @@ class PiManagerApp(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # 图标
-        icon_path = Path(__file__).parent / "assets" / "icon.ico"
+        icon_path = pathlib.Path(__file__).parent / "assets" / "icon.ico"
         if icon_path.exists():
             try:
                 self.iconbitmap(str(icon_path))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"图标加载失败: {e}")
 
         # 网格布局
         self.grid_columnconfigure(0, weight=0)
@@ -193,7 +222,6 @@ class PiManagerApp(tk.Tk):
 
         # 应用背景
         self.after(500, self._apply_background)
-        self.bind("<Configure>", self._on_window_resize)
 
         # 自动连接
         if self._config.get("behavior", {}).get("auto_connect", False):
@@ -201,21 +229,6 @@ class PiManagerApp(tk.Tk):
 
         # 状态栏时钟
         self._update_status_clock()
-
-    # ============================================================
-    #  日志
-    # ============================================================
-
-    def _setup_logging(self):
-        log_path = Path(__file__).parent / "pimanager.log"
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-            handlers=[
-                logging.FileHandler(str(log_path), encoding='utf-8'),
-                logging.StreamHandler()
-            ]
-        )
 
     # ============================================================
     #  侧边栏构建
@@ -227,7 +240,7 @@ class PiManagerApp(tk.Tk):
 
         # ---- Logo / 标题 ----
         self._sidebar.add("logo",
-            PillowLabel("🥧", 0, 18, W, 36,
+            PillowLabel("\U0001f9e7", 0, 18, W, 36,
                         font_size=32, align="center"))
         self._sidebar.add("logo_text",
             PillowLabel("PiManager", 0, 52, W, 24,
@@ -238,7 +251,7 @@ class PiManagerApp(tk.Tk):
         self._sidebar.add("status_card",
             PillowCard(15, 85, W - 30, 52,
                        fill="#161B22", border="gray30", radius=8))
-        self._conn_label = PillowLabel("🔴 未连接", 25, 95, W - 50, 22,
+        self._conn_label = PillowLabel("\U0001f534 未连接", 25, 95, W - 50, 22,
                                        font_size=12)
         self._sidebar.add("conn_status", self._conn_label)
         self._conn_host_label = PillowLabel("", 25, 116, W - 50, 18,
@@ -246,7 +259,7 @@ class PiManagerApp(tk.Tk):
         self._sidebar.add("conn_host", self._conn_host_label)
 
         # ---- 连接按钮 ----
-        self._connect_btn = PillowButton("🔌 连接", 15, 150, W - 30, 34,
+        self._connect_btn = PillowButton("\U0001f50c 连接", 15, 150, W - 30, 34,
                                         command=self._toggle_connection,
                                         font_size=12)
         self._sidebar.add("btn_connect", self._connect_btn)
@@ -260,7 +273,7 @@ class PiManagerApp(tk.Tk):
 
         # ---- 系统状态卡片（初始隐藏）----
         self._sys_card = PillowCard(15, 232, W - 30, 160,
-                                     title="📡 实时状态",
+                                     title="\U0001f4e1 实时状态",
                                      fill="#161B22", border="gray30", radius=8)
         self._sys_card.visible = False
         self._sidebar.add("sys_card", self._sys_card)
@@ -270,7 +283,7 @@ class PiManagerApp(tk.Tk):
         self._sidebar.add("sidebar_cpu_bar", self._sidebar_cpu_bar)
         self._sidebar_cpu_bar.visible = False
         self._sidebar.add("sidebar_cpu_label",
-            PillowLabel("🔥 CPU", 20, 256, 48, 16, font_size=10, color="#8B949E"))
+            PillowLabel("\U0001f525 CPU", 20, 256, 48, 16, font_size=10, color="#8B949E"))
         self._sidebar_cpu_pct = PillowLabel("--", 165, 256, 48, 16,
                                             font_size=10, color="#C9D1D9", align="right")
         self._sidebar.add("sidebar_cpu_pct", self._sidebar_cpu_pct)
@@ -281,20 +294,20 @@ class PiManagerApp(tk.Tk):
         self._sidebar.add("sidebar_ram_bar", self._sidebar_ram_bar)
         self._sidebar_ram_bar.visible = False
         self._sidebar.add("sidebar_ram_label",
-            PillowLabel("🧠 RAM", 20, 282, 48, 16, font_size=10, color="#8B949E"))
+            PillowLabel("\U0001f9e0 RAM", 20, 282, 48, 16, font_size=10, color="#8B949E"))
         self._sidebar_ram_pct = PillowLabel("--", 165, 282, 48, 16,
                                             font_size=10, color="#C9D1D9", align="right")
         self._sidebar.add("sidebar_ram_pct", self._sidebar_ram_pct)
         self._sidebar_ram_pct.visible = False
 
         # IP
-        self._sidebar_ip = PillowLabel("🌐 --", 20, 310, W - 40, 16,
+        self._sidebar_ip = PillowLabel("\U0001f310 --", 20, 310, W - 40, 16,
                                        font_size=10, color="#8B949E")
         self._sidebar.add("sidebar_ip", self._sidebar_ip)
         self._sidebar_ip.visible = False
 
         # Temp
-        self._sidebar_temp = PillowLabel("🌡️ --°C", 20, 334, W - 40, 18,
+        self._sidebar_temp = PillowLabel("\U0001f321️ --°C", 20, 334, W - 40, 18,
                                          font_size=13, weight="bold", color="#4CAF50")
         self._sidebar.add("sidebar_temp", self._sidebar_temp)
         self._sidebar_temp.visible = False
@@ -302,9 +315,9 @@ class PiManagerApp(tk.Tk):
         # ---- 导航按钮 ----
         self._nav_buttons = {}
         nav_items = [
-            ("📊  系统状态", "status"),
-            ("📁  文件管理", "files"),
-            ("💻  命令终端", "terminal"),
+            ("\U0001f4ca  系统状态", "status"),
+            ("\U0001f4c1  文件管理", "files"),
+            ("\U0001f4bb  命令终端", "terminal"),
             ("⚙️  应用设置", "settings"),
         ]
         for i, (text, page_id) in enumerate(nav_items):
@@ -315,7 +328,7 @@ class PiManagerApp(tk.Tk):
             self._nav_buttons[page_id] = btn
 
         # ---- 电源按钮 ----
-        self._reboot_btn = PillowButton("🔄 重启", 15, 580, (W - 36) // 2, 30,
+        self._reboot_btn = PillowButton("\U0001f504 重启", 15, 580, (W - 36) // 2, 30,
                                         command=self._reboot_pi,
                                         style="transparent", font_size=11,
                                         disabled=True)
@@ -329,13 +342,16 @@ class PiManagerApp(tk.Tk):
 
         # ---- 版本 ----
         self._sidebar.add("version",
-            PillowLabel("v2.0.0", 0, 640, W, 20,
+            PillowLabel('v' + __version__, 0, 640, W, 20,
                         font_size=10, color="gray", align="center"))
 
         self._sidebar.render()
 
-    def _highlight_nav(self, page_id: str):
-        """高亮当前导航按钮。"""
+    def _highlight_nav(self, page_id):
+        """
+        高亮当前导航按钮
+        :param page_id: 页面标识符
+        """
         for pid, btn in self._nav_buttons.items():
             if pid == page_id:
                 btn.set_style("primary")
@@ -424,8 +440,11 @@ class PiManagerApp(tk.Tk):
                                            self._ssh, app_ref=self)
         self._pages["settings"] = self._settings_page
 
-    def _show_page(self, page_id: str):
-        """切换页面。"""
+    def _show_page(self, page_id):
+        """
+        切换页面
+        :param page_id: 页面标识符
+        """
         if self._current_page == page_id:
             return
         self._current_page = page_id
@@ -437,6 +456,12 @@ class PiManagerApp(tk.Tk):
         page = self._pages[page_id]
         page.grid(row=0, column=0, sticky="nsew")
 
+        # BUG 5: 页面离开时停止自动刷新，进入状态页时恢复
+        if hasattr(self, '_status_panel') and page_id != 'status':
+            self._status_panel.stop_auto_refresh()
+        elif page_id == 'status' and hasattr(self, '_status_panel') and self._ssh.connected:
+            self._status_panel.start_auto_refresh()
+
         if page_id == "status" and self._ssh.connected:
             self._status_panel.refresh()
         elif page_id == "files" and self._ssh.connected:
@@ -446,20 +471,18 @@ class PiManagerApp(tk.Tk):
     #  背景管理
     # ============================================================
 
-    def _on_window_resize(self, event=None):
-        """窗口 resize 防抖。"""
-        # 由各 PageCanvas 自行处理 resize
-        pass
-
-    def _apply_background(self, force=False):
+    def _apply_background(self):
         """应用背景图片。"""
         bg_path = self._config["appearance"].get("background_path", "")
         opacity = self._config["appearance"].get("background_opacity", 0.15)
+        fit_mode = self._config["appearance"].get("background_fit_mode", "cover")
+        BackgroundManager.set_fit_mode(fit_mode)
         BackgroundManager.set_background(bg_path, float(opacity))
 
     def refresh_all_canvases(self):
         """主题/字体变更后刷新所有页面。"""
-        # 更新侧边栏颜色
+        # 更新侧边栏：先传播主题色到组件，再设置背景并渲染
+        self._sidebar.apply_theme()
         self._sidebar.set_bg_color(ThemeColors.get("bg"))
         self._sidebar.render()
         # 更新状态栏
@@ -484,7 +507,7 @@ class PiManagerApp(tk.Tk):
             conn.get("username", "pi"),
             conn.get("key_path", ""),
             conn.get("password", ""),
-            conn.get("use_key", True),
+            conn.get("use_key", True)
         )
 
     def _toggle_connection(self):
@@ -501,7 +524,7 @@ class PiManagerApp(tk.Tk):
                 conn.get("username", "pi"),
                 conn.get("key_path", ""),
                 conn.get("password", ""),
-                conn.get("use_key", True),
+                conn.get("use_key", True)
             )
 
     def _do_connect(self, host, port, username, key_path, password, use_key):
@@ -517,13 +540,13 @@ class PiManagerApp(tk.Tk):
 
         threading.Thread(target=_connect, daemon=True).start()
 
-    def _on_connect_result(self, ok: bool, msg: str):
+    def _on_connect_result(self, ok, msg):
         if ok:
             self._connect_time = datetime.datetime.now()
-            self._conn_label.set_text("🟢 已连接")
+            self._conn_label.set_text("\U0001f7e2 已连接")
             self._conn_label.set_color("#4CAF50")
             self._conn_host_label.set_text(f"{self._ssh.host}")
-            self._connect_btn.set_text("🔌 断开")
+            self._connect_btn.set_text("\U0001f50c 断开")
             self._connect_btn.set_style("danger")
             self._connect_btn.set_disabled(False)
             self._status_label.configure(text="已连接")
@@ -548,26 +571,26 @@ class PiManagerApp(tk.Tk):
                 self._status_panel.start_auto_refresh()
             elif self._current_page == "files":
                 self._file_browser.refresh()
-            logging.info(f"已连接到 {self._ssh.host}")
+            print(f"已连接到 {self._ssh.host}")
         else:
             self._connect_time = None
-            self._conn_label.set_text("🔴 连接失败")
+            self._conn_label.set_text("\U0001f534 连接失败")
             self._conn_label.set_color("#FF6B6B")
             self._conn_host_label.set_text(msg)
-            self._connect_btn.set_text("🔌 连接")
+            self._connect_btn.set_text("\U0001f50c 连接")
             self._connect_btn.set_style("primary")
             self._connect_btn.set_disabled(False)
             self._status_label.configure(text="连接失败")
-            logging.warning(f"连接失败: {msg}")
+            print(f"连接失败: {msg}")
             messagebox.showerror("连接失败", msg)
 
     def _on_disconnected(self):
         self._connect_time = None
         self._status_duration.configure(text="")
-        self._conn_label.set_text("🔴 未连接")
+        self._conn_label.set_text("\U0001f534 未连接")
         self._conn_label.set_color("#8B949E")
         self._conn_host_label.set_text("")
-        self._connect_btn.set_text("🔌 连接")
+        self._connect_btn.set_text("\U0001f50c 连接")
         self._connect_btn.set_style("primary")
         self._status_label.configure(text="已断开")
 
@@ -586,7 +609,7 @@ class PiManagerApp(tk.Tk):
 
         if self._current_page == "status":
             self._status_panel.stop_auto_refresh()
-        logging.info("已断开连接")
+        print("已断开连接")
 
     # ============================================================
     #  侧边栏系统状态刷新
@@ -600,13 +623,20 @@ class PiManagerApp(tk.Tk):
         def _fetch():
             try:
                 s = self._ssh.get_sidebar_stats()
-                self.after(0, lambda: self._update_sidebar_ui(
+                self.after(0, lambda: self._safe_update_sidebar(
                     s["cpu"], s["mem_pct"], s["mem_used"],
                     s["mem_total"], s["ip"], s["temp"]))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"侧边栏状态获取失败: {e}")
 
         threading.Thread(target=_fetch, daemon=True).start()
+
+    def _safe_update_sidebar(self, cpu, mem_pct, mem_used, mem_total, ip_addr, temp):
+        """安全更新侧边栏 UI，防止控件销毁后回调崩溃 (BUG 6)。"""
+        try:
+            self._update_sidebar_ui(cpu, mem_pct, mem_used, mem_total, ip_addr, temp)
+        except Exception:
+            pass
 
     def _update_sidebar_ui(self, cpu, mem_pct, mem_used, mem_total, ip_addr, temp):
         """更新侧边栏 UI — Pillow 组件。"""
@@ -623,10 +653,10 @@ class PiManagerApp(tk.Tk):
         ram_c = ok if mem_pct < 50 else (warn if mem_pct < 80 else danger)
         self._sidebar_ram_bar.set_color(ram_c)
 
-        self._sidebar_ip.set_text(f"🌐 {ip_addr}")
+        self._sidebar_ip.set_text(f"\U0001f310 {ip_addr}")
 
         t_color = ok if temp < 50 else (warn if temp < 70 else danger)
-        self._sidebar_temp.set_text(f"🌡️ {temp:.1f}°C")
+        self._sidebar_temp.set_text(f"\U0001f321️ {temp:.1f}°C")
         self._sidebar_temp.set_color(t_color)
 
     def _start_sidebar_refresh(self):
@@ -657,7 +687,7 @@ class PiManagerApp(tk.Tk):
             self._ssh.exec_command("sudo shutdown -h now", timeout=5)
         threading.Thread(target=_do, daemon=True).start()
         self._status_label.configure(text="已发送关机命令")
-        logging.info("发送关机命令")
+        print("发送关机命令")
         messagebox.showinfo("已发送", "关机命令已发送，树莓派即将关闭")
 
     def _reboot_pi(self):
@@ -670,7 +700,7 @@ class PiManagerApp(tk.Tk):
             self._ssh.exec_command("sudo shutdown -r now", timeout=5)
         threading.Thread(target=_do, daemon=True).start()
         self._status_label.configure(text="已发送重启命令")
-        logging.info("发送重启命令")
+        print("发送重启命令")
         messagebox.showinfo("已发送", "重启命令已发送，树莓派即将重启")
 
     # ============================================================
@@ -729,7 +759,7 @@ class PiManagerApp(tk.Tk):
         key_entry.grid(row=0, column=0, sticky="ew")
         key_entry.insert(0, conn.get("key_path", ""))
         entries["key_path"] = key_entry
-        tk.Button(key_frame, text="📂", width=4, height=1,
+        tk.Button(key_frame, text="\U0001f4c2", width=4, height=1,
                  command=lambda: self._browse_key(key_entry)).grid(
             row=0, column=1, padx=(4, 0))
 
@@ -745,13 +775,13 @@ class PiManagerApp(tk.Tk):
                 "key_path": entries["key_path"].get(),
                 "use_key": bool(entries["key_path"].get()),
             }]
-            save_config(self._config)
+            config.save_config(self._config)
             dialog.destroy()
             messagebox.showinfo("保存成功", "连接设置已保存")
 
-        tk.Button(btn_frame, text="💾 保存并连接",
+        tk.Button(btn_frame, text="\U0001f4be 保存并连接",
                  command=lambda: (_save(), self._auto_connect()),
-                 bg="#2B5B2B", fg="white", relief="flat", padx=12, pady=4).pack(
+                 bg=ThemeColors.get("accent"), fg="white", relief="flat", padx=12, pady=4).pack(
             side="left", padx=5)
         tk.Button(btn_frame, text="保存", command=_save,
                  relief="flat", padx=12, pady=4).pack(side="left", padx=5)
@@ -776,5 +806,5 @@ class PiManagerApp(tk.Tk):
         if self._current_page == "status":
             self._status_panel.stop_auto_refresh()
         self._ssh.disconnect()
-        logging.info("应用关闭")
+        print("应用关闭")
         self.destroy()
