@@ -112,10 +112,14 @@ class TestConfigMigration(unittest.TestCase):
         # behavior 是 V2 新增的
         self.assertIn('behavior', merged)
         self.assertIn('terminal_history_size', merged['behavior'])
+        # V3 新增的
+        self.assertIn('ip_drift_detection', merged['behavior'])
+        self.assertIn('auto_rediscover', merged['connections'][0])
+        self.assertIn('last_resolved_ip', merged['connections'][0])
         # 原有值保留
         self.assertEqual(merged['connections'][0]['host'], 'test')
         # 版本升级
-        self.assertEqual(merged['version'], 2)
+        self.assertEqual(merged['version'], 3)
 
     def test_merge_overrides_none_with_default(self):
         """用户值覆盖默认值，缺失字段用默认值补全。"""

@@ -12,7 +12,7 @@ CONFIG_FILE = CONFIG_DIR / 'pimanager.json'
 CONFIG_BACKUP_DIR = CONFIG_DIR / 'config_backups'
 
 # 配置版本号（用于迁移）
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 
 DEFAULT_CONFIG = {
     'version': CONFIG_VERSION,
@@ -24,6 +24,8 @@ DEFAULT_CONFIG = {
             'username': 'chenxi',
             'key_path': str(Path.home() / '.ssh' / 'id_ed25519'),
             'use_key': True,
+            'auto_rediscover': False,
+            'last_resolved_ip': '',
         }
     ],
     'appearance': {
@@ -39,6 +41,7 @@ DEFAULT_CONFIG = {
         'refresh_interval': 3,
         'confirm_before_delete': True,
         'terminal_history_size': 500,
+        'ip_drift_detection': True,
     }
 }
 
@@ -57,6 +60,20 @@ def _migrate_v1_to_v2(config):
 
 
 _MIGRATIONS[1] = _migrate_v1_to_v2
+
+
+def _migrate_v2_to_v3(config):
+    """V2 → V3: 添加 IP 漂移检测配置"""
+    config['version'] = 3
+    config.setdefault('behavior', {})
+    config['behavior'].setdefault('ip_drift_detection', True)
+    for conn in config.get('connections', []):
+        conn.setdefault('auto_rediscover', False)
+        conn.setdefault('last_resolved_ip', '')
+    return config
+
+
+_MIGRATIONS[2] = _migrate_v2_to_v3
 
 
 def _migrate_and_merge(config):
