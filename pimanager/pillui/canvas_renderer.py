@@ -344,7 +344,7 @@ class PageCanvas(tk.Canvas):
         """
         if theme_colors is None:
             try:
-                from pimanager.theme import ThemeColors as tc
+                from ..theme import ThemeColors as tc
                 theme_colors = tc
             except ImportError:
                 return

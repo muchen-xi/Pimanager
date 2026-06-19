@@ -6,8 +6,6 @@ import unittest
 import sys
 import os
 
-# 添加项目根目录
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class TestTerminalLineBuffer(unittest.TestCase):

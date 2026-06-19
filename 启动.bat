@@ -2,5 +2,5 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 echo 🥧 启动 PiManager...
-python -m pimanager.main
+python main.py
 pause

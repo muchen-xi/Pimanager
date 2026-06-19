@@ -105,7 +105,7 @@ class PillowOptionMenu(BaseComponent):
         :return: hex 颜色字符串
         """
         try:
-            from pimanager.theme import ThemeColors
+            from ..theme import ThemeColors
             return ThemeColors.get(key)
         except ImportError as e:
             print('[PillowOptionMenu] 无法导入 ThemeColors: %s' % e)

@@ -6,10 +6,7 @@ import tkinter as tk
 import sys
 import os
 
-# 确保 pillui 可导入
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from pillui import PageCanvas, PillowButton, PillowLabel, PillowProgressBar
+from pimanager.pillui import PageCanvas, PillowButton, PillowLabel, PillowProgressBar
 
 
 def main():

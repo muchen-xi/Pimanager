@@ -57,44 +57,46 @@ ssh-copy-id pi@raspberrypi.local
 **命令行：**
 
 ```bash
-python -m pimanager.main
+python main.py
 ```
 
 ## 项目结构
 
 ```
 pimanager/
-├── main.py              # 入口文件
-├── app.py               # 主应用窗口（侧边栏、导航、背景管理）
-├── ssh_client.py        # SSH 客户端（paramiko 封装）
-├── status_panel.py      # 系统状态监控面板
-├── file_browser.py      # 远程文件管理器（双栏模式 + 远程执行）
-├── terminal_page.py     # 多标签流式命令终端
-├── settings_page.py     # 应用设置页（卡片式布局）
-├── config.py            # 配置管理（版本迁移、验证、备份恢复）
-├── theme.py             # 主题色彩系统
-├── pillui/              # 自建 Pillow Canvas UI 组件库
+├── main.py                # 入口文件
+├── pimanager/             # 核心包
 │   ├── __init__.py
-│   ├── button.py
-│   ├── label.py
-│   ├── card.py
-│   ├── checkbox.py
-│   ├── slider.py
-│   ├── progress_bar.py
-│   ├── option_menu.py
-│   ├── scroll_frame.py
-│   ├── canvas_renderer.py
-│   ├── image_utils.py
-│   └── _draw_utils.py
-├── tests/               # 测试套件
-├── docs/                # 文档
+│   ├── app.py             # 主应用窗口（侧边栏、导航、背景管理）
+│   ├── ssh_client.py      # SSH 客户端（paramiko 封装）
+│   ├── status_panel.py    # 系统状态监控面板
+│   ├── file_browser.py    # 远程文件管理器（双栏模式 + 远程执行）
+│   ├── terminal_page.py   # 多标签流式命令终端
+│   ├── settings_page.py   # 应用设置页（卡片式布局）
+│   ├── config.py          # 配置管理（版本迁移、验证、备份恢复）
+│   ├── theme.py           # 主题色彩系统
+│   └── pillui/            # 自建 Pillow Canvas UI 组件库
+│       ├── __init__.py
+│       ├── button.py
+│       ├── label.py
+│       ├── card.py
+│       ├── checkbox.py
+│       ├── slider.py
+│       ├── progress_bar.py
+│       ├── option_menu.py
+│       ├── scroll_frame.py
+│       ├── canvas_renderer.py
+│       ├── image_utils.py
+│       └── _draw_utils.py
+├── tests/                 # 测试套件
+├── docs/                  # 文档
 │   ├── USER_GUIDE.md
 │   ├── ARCHITECTURE.md
 │   ├── API.md
 │   └── COMPLIANCE_REPORT.md
-├── requirements.txt     # Python 依赖
-├── 启动.bat             # Windows 启动脚本
-└── assets/              # 资源文件
+├── requirements.txt       # Python 依赖
+├── 启动.bat               # Windows 启动脚本
+└── assets/                # 资源文件
 ```
 
 ## 使用说明
