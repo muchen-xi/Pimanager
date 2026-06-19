@@ -1158,6 +1158,10 @@ v2.1.0 是一个稳定性与功能增强版本，共修复 37 个 bug，涵盖�
 - **BackgroundManager 增强**：新增 `set_fit_mode(mode)` 类方法，背景缓存 key 从 `(size,)` 扩展为 `(size, fit_mode)`，模式切换时清除缓存
 - **错误弹窗**：背景图片加载失败时弹出 `messagebox.showerror` 提示用户，而非静默失败
 
+### 9.4 v2.1.1 紧急修复
+- **emoji 清除**：Pillow 无字体回退，所有 emoji 字符被替换为纯文字，消除文字豆腐块问题
+- **设置页修复**：`hex_to_rgba()` 无法解析 Tkinter 颜色名 `"gray30"`，改为 hex 值 `"#4D4D4D"`
+
 ---
 
 *文档生成日期：2026-06-19*

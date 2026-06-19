@@ -12,7 +12,7 @@ class PillowCard(BaseComponent):
 
     def __init__(self, x=0, y=0, w=200, h=100,
                  title='', fill='#161B22',
-                 border='gray35', radius=10, title_size=13):
+                 border='#4D4D4D', radius=10, title_size=13):
         super().__init__(x, y, w, h)
         self.title = title
         self.fill_color = fill

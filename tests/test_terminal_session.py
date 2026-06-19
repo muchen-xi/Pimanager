@@ -264,7 +264,7 @@ class TestTerminalSessionEdgeCases(unittest.TestCase):
 
     def test_unicode_command(self):
         """Unicode 命令应正常保存。"""
-        cmd = 'echo "你好世界 🌍"'
+        cmd = 'echo "你好世界"'
         self.session.add_history(cmd)
         self.assertEqual(self.session.history[0], cmd)
 

@@ -240,7 +240,7 @@ class PiManagerApp(tk.Tk):
 
         # ---- Logo / 标题 ----
         self._sidebar.add("logo",
-            PillowLabel("\U0001f9e7", 0, 18, W, 36,
+            PillowLabel("Pi", 0, 18, W, 36,
                         font_size=32, align="center"))
         self._sidebar.add("logo_text",
             PillowLabel("PiManager", 0, 52, W, 24,
@@ -250,8 +250,8 @@ class PiManagerApp(tk.Tk):
         # ---- 连接状态 ----
         self._sidebar.add("status_card",
             PillowCard(15, 85, W - 30, 52,
-                       fill="#161B22", border="gray30", radius=8))
-        self._conn_label = PillowLabel("\U0001f534 未连接", 25, 95, W - 50, 22,
+                       fill="#161B22", border="#4D4D4D", radius=8))
+        self._conn_label = PillowLabel("未连接", 25, 95, W - 50, 22,
                                        font_size=12)
         self._sidebar.add("conn_status", self._conn_label)
         self._conn_host_label = PillowLabel("", 25, 116, W - 50, 18,
@@ -259,12 +259,12 @@ class PiManagerApp(tk.Tk):
         self._sidebar.add("conn_host", self._conn_host_label)
 
         # ---- 连接按钮 ----
-        self._connect_btn = PillowButton("\U0001f50c 连接", 15, 150, W - 30, 34,
+        self._connect_btn = PillowButton("连接", 15, 150, W - 30, 34,
                                         command=self._toggle_connection,
                                         font_size=12)
         self._sidebar.add("btn_connect", self._connect_btn)
         self._sidebar.add("btn_settings_conn",
-            PillowButton("⚙️ 连接设置", 15, 190, W - 30, 30,
+            PillowButton("[连接设置]", 15, 190, W - 30, 30,
                          command=self._show_conn_settings,
                          style="transparent", font_size=11))
 
@@ -273,8 +273,8 @@ class PiManagerApp(tk.Tk):
 
         # ---- 系统状态卡片（初始隐藏）----
         self._sys_card = PillowCard(15, 232, W - 30, 160,
-                                     title="\U0001f4e1 实时状态",
-                                     fill="#161B22", border="gray30", radius=8)
+                                     title="实时状态",
+                                     fill="#161B22", border="#4D4D4D", radius=8)
         self._sys_card.visible = False
         self._sidebar.add("sys_card", self._sys_card)
 
@@ -283,7 +283,7 @@ class PiManagerApp(tk.Tk):
         self._sidebar.add("sidebar_cpu_bar", self._sidebar_cpu_bar)
         self._sidebar_cpu_bar.visible = False
         self._sidebar.add("sidebar_cpu_label",
-            PillowLabel("\U0001f525 CPU", 20, 256, 48, 16, font_size=10, color="#8B949E"))
+            PillowLabel("CPU", 20, 256, 48, 16, font_size=10, color="#8B949E"))
         self._sidebar_cpu_pct = PillowLabel("--", 165, 256, 48, 16,
                                             font_size=10, color="#C9D1D9", align="right")
         self._sidebar.add("sidebar_cpu_pct", self._sidebar_cpu_pct)
@@ -294,20 +294,20 @@ class PiManagerApp(tk.Tk):
         self._sidebar.add("sidebar_ram_bar", self._sidebar_ram_bar)
         self._sidebar_ram_bar.visible = False
         self._sidebar.add("sidebar_ram_label",
-            PillowLabel("\U0001f9e0 RAM", 20, 282, 48, 16, font_size=10, color="#8B949E"))
+            PillowLabel("RAM", 20, 282, 48, 16, font_size=10, color="#8B949E"))
         self._sidebar_ram_pct = PillowLabel("--", 165, 282, 48, 16,
                                             font_size=10, color="#C9D1D9", align="right")
         self._sidebar.add("sidebar_ram_pct", self._sidebar_ram_pct)
         self._sidebar_ram_pct.visible = False
 
         # IP
-        self._sidebar_ip = PillowLabel("\U0001f310 --", 20, 310, W - 40, 16,
+        self._sidebar_ip = PillowLabel("--", 20, 310, W - 40, 16,
                                        font_size=10, color="#8B949E")
         self._sidebar.add("sidebar_ip", self._sidebar_ip)
         self._sidebar_ip.visible = False
 
         # Temp
-        self._sidebar_temp = PillowLabel("\U0001f321️ --°C", 20, 334, W - 40, 18,
+        self._sidebar_temp = PillowLabel("--°C", 20, 334, W - 40, 18,
                                          font_size=13, weight="bold", color="#4CAF50")
         self._sidebar.add("sidebar_temp", self._sidebar_temp)
         self._sidebar_temp.visible = False
@@ -315,10 +315,10 @@ class PiManagerApp(tk.Tk):
         # ---- 导航按钮 ----
         self._nav_buttons = {}
         nav_items = [
-            ("\U0001f4ca  系统状态", "status"),
-            ("\U0001f4c1  文件管理", "files"),
-            ("\U0001f4bb  命令终端", "terminal"),
-            ("⚙️  应用设置", "settings"),
+            ("系统状态", "status"),
+            ("文件管理", "files"),
+            ("命令终端", "terminal"),
+            ("[应用设置]", "settings"),
         ]
         for i, (text, page_id) in enumerate(nav_items):
             btn = PillowButton(text, 15, 400 + i * 44, W - 30, 36,
@@ -328,12 +328,12 @@ class PiManagerApp(tk.Tk):
             self._nav_buttons[page_id] = btn
 
         # ---- 电源按钮 ----
-        self._reboot_btn = PillowButton("\U0001f504 重启", 15, 580, (W - 36) // 2, 30,
+        self._reboot_btn = PillowButton("重启", 15, 580, (W - 36) // 2, 30,
                                         command=self._reboot_pi,
                                         style="transparent", font_size=11,
                                         disabled=True)
         self._sidebar.add("btn_reboot", self._reboot_btn)
-        self._shutdown_btn = PillowButton("⏻ 关机", 15 + (W - 36) // 2 + 6, 580,
+        self._shutdown_btn = PillowButton("关机", 15 + (W - 36) // 2 + 6, 580,
                                           (W - 36) // 2, 30,
                                           command=self._shutdown_pi,
                                           style="danger", font_size=11,
@@ -529,7 +529,7 @@ class PiManagerApp(tk.Tk):
 
     def _do_connect(self, host, port, username, key_path, password, use_key):
         self._status_label.configure(text=f"正在连接 {host}...")
-        self._connect_btn.set_text("⏳ 连接中...")
+        self._connect_btn.set_text("连接中...")
         self._connect_btn.set_disabled(True)
 
         def _connect():
@@ -543,10 +543,10 @@ class PiManagerApp(tk.Tk):
     def _on_connect_result(self, ok, msg):
         if ok:
             self._connect_time = datetime.datetime.now()
-            self._conn_label.set_text("\U0001f7e2 已连接")
+            self._conn_label.set_text("已连接")
             self._conn_label.set_color("#4CAF50")
             self._conn_host_label.set_text(f"{self._ssh.host}")
-            self._connect_btn.set_text("\U0001f50c 断开")
+            self._connect_btn.set_text("断开")
             self._connect_btn.set_style("danger")
             self._connect_btn.set_disabled(False)
             self._status_label.configure(text="已连接")
@@ -574,10 +574,10 @@ class PiManagerApp(tk.Tk):
             print(f"已连接到 {self._ssh.host}")
         else:
             self._connect_time = None
-            self._conn_label.set_text("\U0001f534 连接失败")
+            self._conn_label.set_text("连接失败")
             self._conn_label.set_color("#FF6B6B")
             self._conn_host_label.set_text(msg)
-            self._connect_btn.set_text("\U0001f50c 连接")
+            self._connect_btn.set_text("连接")
             self._connect_btn.set_style("primary")
             self._connect_btn.set_disabled(False)
             self._status_label.configure(text="连接失败")
@@ -587,10 +587,10 @@ class PiManagerApp(tk.Tk):
     def _on_disconnected(self):
         self._connect_time = None
         self._status_duration.configure(text="")
-        self._conn_label.set_text("\U0001f534 未连接")
+        self._conn_label.set_text("未连接")
         self._conn_label.set_color("#8B949E")
         self._conn_host_label.set_text("")
-        self._connect_btn.set_text("\U0001f50c 连接")
+        self._connect_btn.set_text("连接")
         self._connect_btn.set_style("primary")
         self._status_label.configure(text="已断开")
 
@@ -653,10 +653,10 @@ class PiManagerApp(tk.Tk):
         ram_c = ok if mem_pct < 50 else (warn if mem_pct < 80 else danger)
         self._sidebar_ram_bar.set_color(ram_c)
 
-        self._sidebar_ip.set_text(f"\U0001f310 {ip_addr}")
+        self._sidebar_ip.set_text(f"{ip_addr}")
 
         t_color = ok if temp < 50 else (warn if temp < 70 else danger)
-        self._sidebar_temp.set_text(f"\U0001f321️ {temp:.1f}°C")
+        self._sidebar_temp.set_text(f"{temp:.1f}°C")
         self._sidebar_temp.set_color(t_color)
 
     def _start_sidebar_refresh(self):
@@ -680,7 +680,7 @@ class PiManagerApp(tk.Tk):
     def _shutdown_pi(self):
         if not self._ssh.connected:
             return
-        if not messagebox.askyesno("⚠️ 确认关机",
+        if not messagebox.askyesno("确认关机",
             "确定要关闭树莓派吗？\n\n关机后需手动重新上电才能启动。", icon="warning"):
             return
         def _do():
@@ -693,7 +693,7 @@ class PiManagerApp(tk.Tk):
     def _reboot_pi(self):
         if not self._ssh.connected:
             return
-        if not messagebox.askyesno("⚠️ 确认重启",
+        if not messagebox.askyesno("确认重启",
             "确定要重启树莓派吗？\n\n重启期间连接将断开，约 30 秒后可重新连接。", icon="warning"):
             return
         def _do():
@@ -759,7 +759,7 @@ class PiManagerApp(tk.Tk):
         key_entry.grid(row=0, column=0, sticky="ew")
         key_entry.insert(0, conn.get("key_path", ""))
         entries["key_path"] = key_entry
-        tk.Button(key_frame, text="\U0001f4c2", width=4, height=1,
+        tk.Button(key_frame, text="...", width=4, height=1,
                  command=lambda: self._browse_key(key_entry)).grid(
             row=0, column=1, padx=(4, 0))
 
@@ -779,7 +779,7 @@ class PiManagerApp(tk.Tk):
             dialog.destroy()
             messagebox.showinfo("保存成功", "连接设置已保存")
 
-        tk.Button(btn_frame, text="\U0001f4be 保存并连接",
+        tk.Button(btn_frame, text="保存并连接",
                  command=lambda: (_save(), self._auto_connect()),
                  bg=ThemeColors.get("accent"), fg="white", relief="flat", padx=12, pady=4).pack(
             side="left", padx=5)

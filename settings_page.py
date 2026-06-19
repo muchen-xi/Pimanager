@@ -44,8 +44,8 @@ class SettingsPage(tk.Frame):
         y0 = 10
 
         c.add("appearance_card",
-              PillowCard(10, y0, 540, 170, title="🎨 外观设置",
-                         fill="#161B22", border="gray30"))
+              PillowCard(10, y0, 540, 170, title="外观设置",
+                         fill="#161B22", border="#4D4D4D"))
 
         # 主题模式
         self._theme_var = tk.StringVar(
@@ -93,8 +93,8 @@ class SettingsPage(tk.Frame):
         y0 = 190
 
         c.add("bg_card",
-              PillowCard(10, y0, 540, 190, title="🖼️ 背景设置",
-                         fill="#161B22", border="gray30"))
+              PillowCard(10, y0, 540, 190, title="背景设置",
+                         fill="#161B22", border="#4D4D4D"))
 
         # 当前背景
         bg_path = self._config["appearance"].get("background_path", "")
@@ -105,10 +105,10 @@ class SettingsPage(tk.Frame):
 
         # 选择/清除按钮
         c.add("btn_choose_bg",
-              PillowButton("📂 选择图片", 24, y0 + 62, 120, 28,
+              PillowButton("选择图片...", 24, y0 + 62, 120, 28,
                            command=self._choose_bg, font_size=11))
         c.add("btn_clear_bg",
-              PillowButton("🗑 清除背景", 154, y0 + 62, 120, 28,
+              PillowButton("清除背景", 154, y0 + 62, 120, 28,
                            command=self._clear_bg,
                            style="transparent", font_size=11))
 
@@ -146,8 +146,8 @@ class SettingsPage(tk.Frame):
         y0 = 390
 
         c.add("behavior_card",
-              PillowCard(10, y0, 540, 155, title="⚡ 行为设置",
-                         fill="#161B22", border="gray30"))
+              PillowCard(10, y0, 540, 155, title="行为设置",
+                         fill="#161B22", border="#4D4D4D"))
 
         # 自动连接
         self._auto_var = tk.BooleanVar(
@@ -185,8 +185,8 @@ class SettingsPage(tk.Frame):
         y0 = 555
 
         c.add("about_card",
-              PillowCard(10, y0, 540, 100, title="ℹ️ 关于",
-                         fill="#161B22", border="gray30"))
+              PillowCard(10, y0, 540, 100, title="关于",
+                         fill="#161B22", border="#4D4D4D"))
 
         info = 'PiManager v' + __version__ + '\n轻量级树莓派 Zero W 桌面管理器\nPython + tkinter + Pillow + Paramiko\n深色/浅色双主题 · Canvas 原生渲染'
         c.add("about_text",
@@ -194,7 +194,7 @@ class SettingsPage(tk.Frame):
                           font_size=11, color="#8B949E"))
 
         c.add("btn_save",
-              PillowButton("💾 保存所有设置", 380, y0 + 50, 150, 34,
+              PillowButton("保存所有设置", 380, y0 + 50, 150, 34,
                            command=self._save_all, font_size=12))
 
     # ===== 事件处理 =====
@@ -268,7 +268,7 @@ class SettingsPage(tk.Frame):
 
         try:
             save_config(self._config)
-            messagebox.showinfo("保存成功", "所有设置已保存 ✓")
+            messagebox.showinfo("保存成功", "所有设置已保存")
         except Exception as e:
             messagebox.showerror("保存失败", str(e))
 
