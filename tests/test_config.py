@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     _deep_merge, DEFAULT_CONFIG, CONFIG_VERSION,
     validate_config, load_config, save_config, backup_config,
-    restore_config, reset_to_defaults,
+    restore_config, reset_to_defaults
 )
 
 
@@ -22,50 +22,50 @@ class TestDeepMerge(unittest.TestCase):
     """测试深度合并函数"""
 
     def test_simple_merge(self):
-        base = {"a": 1, "b": 2}
-        override = {"b": 3, "c": 4}
+        base = {'a': 1, 'b': 2}
+        override = {'b': 3, 'c': 4}
         _deep_merge(base, override)
-        self.assertEqual(base["a"], 1)
-        self.assertEqual(base["b"], 3)
-        self.assertEqual(base["c"], 4)
+        self.assertEqual(base['a'], 1)
+        self.assertEqual(base['b'], 3)
+        self.assertEqual(base['c'], 4)
 
     def test_nested_merge(self):
-        base = {"outer": {"inner_a": 1, "inner_b": 2}}
-        override = {"outer": {"inner_b": 5}}
+        base = {'outer': {'inner_a': 1, 'inner_b': 2}}
+        override = {'outer': {'inner_b': 5}}
         _deep_merge(base, override)
-        self.assertEqual(base["outer"]["inner_a"], 1)
-        self.assertEqual(base["outer"]["inner_b"], 5)
+        self.assertEqual(base['outer']['inner_a'], 1)
+        self.assertEqual(base['outer']['inner_b'], 5)
 
     def test_new_keys_added(self):
-        base = {"existing": 1}
-        override = {"new_key": {"nested": "value"}}
+        base = {'existing': 1}
+        override = {'new_key': {'nested': 'value'}}
         _deep_merge(base, override)
-        self.assertIn("new_key", base)
-        self.assertEqual(base["new_key"]["nested"], "value")
+        self.assertIn('new_key', base)
+        self.assertEqual(base['new_key']['nested'], 'value')
 
     def test_override_to_none(self):
-        base = {"key": "old"}
-        override = {"key": None}
+        base = {'key': 'old'}
+        override = {'key': None}
         _deep_merge(base, override)
-        self.assertIsNone(base["key"])
+        self.assertIsNone(base['key'])
 
 
 class TestDefaultConfig(unittest.TestCase):
     """测试默认配置"""
 
     def test_default_config_has_version(self):
-        self.assertEqual(DEFAULT_CONFIG["version"], CONFIG_VERSION)
+        self.assertEqual(DEFAULT_CONFIG['version'], CONFIG_VERSION)
 
     def test_default_config_has_required_sections(self):
-        self.assertIn("connections", DEFAULT_CONFIG)
-        self.assertIn("appearance", DEFAULT_CONFIG)
-        self.assertIn("behavior", DEFAULT_CONFIG)
+        self.assertIn('connections', DEFAULT_CONFIG)
+        self.assertIn('appearance', DEFAULT_CONFIG)
+        self.assertIn('behavior', DEFAULT_CONFIG)
 
     def test_default_connection_valid(self):
-        conn = DEFAULT_CONFIG["connections"][0]
-        self.assertIn("host", conn)
-        self.assertIn("port", conn)
-        self.assertIn("username", conn)
+        conn = DEFAULT_CONFIG['connections'][0]
+        self.assertIn('host', conn)
+        self.assertIn('port', conn)
+        self.assertIn('username', conn)
 
 
 class TestValidateConfig(unittest.TestCase):
@@ -78,25 +78,25 @@ class TestValidateConfig(unittest.TestCase):
 
     def test_invalid_port(self):
         config = copy.deepcopy(DEFAULT_CONFIG)
-        config["connections"] = [{"host": "test", "port": 99999}]
+        config['connections'] = [{'host': 'test', 'port': 99999}]
         errors = validate_config(config)
         self.assertTrue(any("端口" in e for e in errors))
 
     def test_invalid_opacity(self):
         config = copy.deepcopy(DEFAULT_CONFIG)
-        config["appearance"]["background_opacity"] = 5.0
+        config['appearance']['background_opacity'] = 5.0
         errors = validate_config(config)
         self.assertTrue(any("透明度" in e for e in errors))
 
     def test_invalid_refresh_interval(self):
         config = copy.deepcopy(DEFAULT_CONFIG)
-        config["behavior"]["refresh_interval"] = 100
+        config['behavior']['refresh_interval'] = 100
         errors = validate_config(config)
         self.assertTrue(any("刷新间隔" in e for e in errors))
 
     def test_empty_host(self):
         config = copy.deepcopy(DEFAULT_CONFIG)
-        config["connections"] = [{"host": "", "port": 22}]
+        config['connections'] = [{'host': '', 'port': 22}]
         errors = validate_config(config)
         self.assertTrue(any("主机地址" in e for e in errors))
 
@@ -107,24 +107,24 @@ class TestConfigMigration(unittest.TestCase):
     def test_merge_preserves_new_defaults(self):
         """合并应确保新默认字段被添加。"""
         from config import _migrate_and_merge
-        old = {"version": 1, "connections": [{"host": "test", "port": 22}]}
+        old = {'version': 1, 'connections': [{'host': 'test', 'port': 22}]}
         merged = _migrate_and_merge(old)
         # behavior 是 V2 新增的
-        self.assertIn("behavior", merged)
-        self.assertIn("terminal_history_size", merged["behavior"])
+        self.assertIn('behavior', merged)
+        self.assertIn('terminal_history_size', merged['behavior'])
         # 原有值保留
-        self.assertEqual(merged["connections"][0]["host"], "test")
+        self.assertEqual(merged['connections'][0]['host'], 'test')
         # 版本升级
-        self.assertEqual(merged["version"], 2)
+        self.assertEqual(merged['version'], 2)
 
     def test_merge_overrides_none_with_default(self):
         """用户值覆盖默认值，缺失字段用默认值补全。"""
         from config import _migrate_and_merge
-        old = {"version": 2, "appearance": {"theme": "light"}}
+        old = {'version': 2, 'appearance': {'theme': 'light'}}
         merged = _migrate_and_merge(old)
-        self.assertEqual(merged["appearance"]["theme"], "light")
+        self.assertEqual(merged['appearance']['theme'], 'light')
         # 未设置的字段用默认值
-        self.assertIn("font_scale", merged["appearance"])
+        self.assertIn('font_scale', merged['appearance'])
 
 
 class TestConfigBackup(unittest.TestCase):
@@ -136,8 +136,8 @@ class TestConfigBackup(unittest.TestCase):
         self._orig_backup = cfg_module.CONFIG_BACKUP_DIR
         # 使用临时目录
         self._tmp = tempfile.TemporaryDirectory()
-        cfg_module.CONFIG_FILE = Path(self._tmp.name) / "test_config.json"
-        cfg_module.CONFIG_BACKUP_DIR = Path(self._tmp.name) / "backups"
+        cfg_module.CONFIG_FILE = Path(self._tmp.name) / 'test_config.json'
+        cfg_module.CONFIG_BACKUP_DIR = Path(self._tmp.name) / 'backups'
 
     def tearDown(self):
         import config as cfg_module
@@ -147,25 +147,25 @@ class TestConfigBackup(unittest.TestCase):
 
     def test_save_and_load(self):
         config = copy.deepcopy(DEFAULT_CONFIG)
-        config["connections"][0]["host"] = "test.local"
+        config['connections'][0]['host'] = 'test.local'
         save_config(config)
         loaded = load_config()
-        self.assertEqual(loaded["connections"][0]["host"], "test.local")
+        self.assertEqual(loaded['connections'][0]['host'], 'test.local')
 
     def test_backup_created_on_save(self):
         config = copy.deepcopy(DEFAULT_CONFIG)
         save_config(config)
         # 再保存一次触发备份
         save_config(config)
-        backups = list(Path(self._tmp.name).glob("backups/pimanager_*.json"))
+        backups = list(Path(self._tmp.name).glob('backups/pimanager_*.json'))
         self.assertGreater(len(backups), 0)
 
     def test_defaults_restored_with_no_file(self):
         # 文件不存在时应返回默认配置
         loaded = load_config()  # 第一次加载已创建文件
-        self.assertIn("version", loaded)
-        self.assertEqual(loaded["version"], CONFIG_VERSION)
+        self.assertIn('version', loaded)
+        self.assertEqual(loaded['version'], CONFIG_VERSION)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

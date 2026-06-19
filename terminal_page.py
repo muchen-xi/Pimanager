@@ -3,7 +3,6 @@ PiManager 命令终端 v3 — tkinter + Canvas 终端输出 + 流式执行
 """
 import tkinter as tk
 import threading
-import shlex
 from collections import deque
 
 from .theme import ThemeColors
@@ -28,8 +27,8 @@ QUICK_COMMANDS = [
 #  CanvasTerminalOutput — Canvas 终端输出
 # ============================================================
 
+# Canvas 渲染的终端输出（非 pillui，因为需要逐行文本布局和历史滚动）
 class CanvasTerminalOutput(tk.Frame):
-    """Canvas 渲染的终端输出。"""
 
     def __init__(self, master, **kw):
         super().__init__(master, bg=ThemeColors.get("bg"), **kw)
@@ -49,7 +48,7 @@ class CanvasTerminalOutput(tk.Frame):
         self._canvas.bind("<Configure>", lambda e: self._redraw())
         BackgroundManager.register(self._canvas)
 
-    def insert(self, pos, text: str, tag=None):
+    def insert(self, pos, text, tag=None):
         color = ThemeColors.get("text")
         if tag == "stderr":
             color = "#FF6B6B"
@@ -89,6 +88,7 @@ class CanvasTerminalOutput(tk.Frame):
         self._scroll_y = max(0, total_h - visible_h + 20)
 
     def _redraw(self):
+        """使用原始 tk.Canvas 绘制终端输出（非 pillui，因为需要逐行文本 + 颜色标签 + 虚拟滚动）。"""
         c = self._canvas
         c.delete("all")
         cw = c.winfo_width() or 400
@@ -121,18 +121,19 @@ class CanvasTerminalOutput(tk.Frame):
 #  TerminalSession — 会话数据模型
 # ============================================================
 
+# 终端会话数据模型 — 管理历史记录和回退
 class TerminalSession:
-    def __init__(self, name: str, index: int):
+    def __init__(self, name, index):
         self.name = name
         self.index = index
         self.history = deque(maxlen=500)
         self.history_index = -1
 
-    def add_history(self, cmd: str):
+    def add_history(self, cmd):
         if cmd.strip():
             self.history.append(cmd)
 
-    def history_up(self) -> str:
+    def history_up(self):
         if not self.history:
             return ""
         if self.history_index == -1:
@@ -141,7 +142,7 @@ class TerminalSession:
             self.history_index -= 1
         return self.history[self.history_index] if self.history_index < len(self.history) else ""
 
-    def history_down(self) -> str:
+    def history_down(self):
         if self.history_index == -1:
             return ""
         if self.history_index < len(self.history) - 1:
@@ -158,10 +159,10 @@ class TerminalSession:
 #  TerminalTab — 单个终端标签页（支持流式执行）
 # ============================================================
 
+# 单个终端标签 — 流式 + 阻塞双模式
 class TerminalTab(tk.Frame):
-    """单个终端标签 — 流式 + 阻塞双模式。"""
 
-    def __init__(self, master, ssh_client, session: TerminalSession, **kw):
+    def __init__(self, master, ssh_client, session, **kw):
         super().__init__(master, bg=ThemeColors.get("bg"), **kw)
         self._ssh = ssh_client
         self._session = session
@@ -198,7 +199,7 @@ class TerminalTab(tk.Frame):
 
         self._btn_send = tk.Button(input_frame, text="发送",
                                    command=self._on_send,
-                                   bg="#2B5B2B", fg="white", relief="flat",
+                                   bg=ThemeColors.get("accent"), fg="white", relief="flat",
                                    font=("Segoe UI", 10), padx=8)
         self._btn_send.pack(side="right", padx=4, pady=2)
 
@@ -223,7 +224,7 @@ class TerminalTab(tk.Frame):
         current = self._stream_var.get()
         self._stream_var.set(not current)
         if self._stream_var.get():
-            self._btn_stream.configure(text="流式:开", bg="#2B5B2B")
+            self._btn_stream.configure(text="流式:开", bg=ThemeColors.get("accent"))
         else:
             self._btn_stream.configure(text="流式:关", bg="#333333")
 
@@ -270,7 +271,7 @@ class TerminalTab(tk.Frame):
         else:
             self._exec_blocking(cmd)
 
-    def _exec_blocking(self, cmd: str):
+    def _exec_blocking(self, cmd):
         self._running = True
         self._exec_generation += 1
         gen = self._exec_generation
@@ -290,7 +291,7 @@ class TerminalTab(tk.Frame):
 
         threading.Thread(target=_do, daemon=True).start()
 
-    def _exec_streaming(self, cmd: str):
+    def _exec_streaming(self, cmd):
         self._running = True
         self._exec_generation += 1
         gen = self._exec_generation
@@ -327,14 +328,14 @@ class TerminalTab(tk.Frame):
         if self._stream_handle and self._stream_handle.is_running:
             self._stream_handle.cancel()
             self._output.insert("end", "进程未响应，已强制关闭\n", "stderr")
-        self._finish_streaming()
+        self._finish_streaming(self._exec_generation)
 
     def _finish_streaming(self, generation=None):
         if generation is not None and generation != self._exec_generation:
             return  # 过时回调，忽略
         self._running = False
         self._stream_handle = None
-        self._btn_send.configure(text="发送", bg="#2B5B2B", state="normal")
+        self._btn_send.configure(text="发送", bg=ThemeColors.get("accent"), state="normal")
 
     def focus_input(self):
         self._entry.focus_set()
@@ -348,10 +349,10 @@ class TerminalTab(tk.Frame):
 #  TerminalPage — 多标签控制器
 # ============================================================
 
+# 多标签终端页
 class TerminalPage(tk.Frame):
-    """多标签终端页。"""
 
-    def __init__(self, master, ssh_client, config: dict = None, app_ref=None):
+    def __init__(self, master, ssh_client, config=None, app_ref=None):
         super().__init__(master, bg=ThemeColors.get("bg"))
         self._ssh = ssh_client
         self._config = config or {}
@@ -378,7 +379,7 @@ class TerminalPage(tk.Frame):
         self._tab_buttons = []
         tk.Button(self._tab_frame, text="＋ 新建",
                  command=lambda: self._add_session(f"终端 {self._session_counter + 1}"),
-                 bg="#2B5B2B", fg="white", relief="flat",
+                 bg=ThemeColors.get("accent"), fg="white", relief="flat",
                  font=("Segoe UI", 9), padx=8).pack(side="right", padx=4, pady=4)
 
     def _rebuild_tab_buttons(self):
@@ -388,7 +389,7 @@ class TerminalPage(tk.Frame):
         for i, sess in enumerate(self._sessions):
             btn = tk.Button(self._tab_frame, text=sess.name,
                            command=lambda idx=i: self._switch_tab(idx),
-                           bg="#2B5B2B" if i == self._active_idx else ThemeColors.get("bg_card"),
+                           bg=ThemeColors.get("accent") if i == self._active_idx else ThemeColors.get("bg_card"),
                            fg="white" if i == self._active_idx else ThemeColors.get("text_secondary"),
                            relief="flat", font=("Segoe UI", 9), padx=10)
             btn.pack(side="left", padx=1, pady=2)
@@ -419,10 +420,10 @@ class TerminalPage(tk.Frame):
                  font=("Segoe UI", 9), padx=8).pack(side="left", padx=2, pady=3)
         tk.Button(bar, text="＋ 新终端",
                  command=lambda: self._add_session(f"终端 {self._session_counter + 1}"),
-                 bg="#2B5B2B", fg="white", relief="flat",
+                 bg=ThemeColors.get("accent"), fg="white", relief="flat",
                  font=("Segoe UI", 9), padx=8).pack(side="right", padx=4, pady=3)
 
-    def _add_session(self, name: str):
+    def _add_session(self, name):
         self._session_counter += 1
         sess = TerminalSession(name, self._session_counter)
         self._sessions.append(sess)
@@ -431,7 +432,7 @@ class TerminalPage(tk.Frame):
         self._tabs[sess.index] = tab
         self._switch_tab(len(self._sessions) - 1)
 
-    def _switch_tab(self, idx: int):
+    def _switch_tab(self, idx):
         self._active_idx = idx
         target_key = self._sessions[idx].index if idx < len(self._sessions) else idx
         for key, tab in self._tabs.items():
@@ -447,7 +448,7 @@ class TerminalPage(tk.Frame):
             return self._tabs.get(self._sessions[self._active_idx].index)
         return None
 
-    def _run_quick(self, cmd: str):
+    def _run_quick(self, cmd):
         tab = self._active_tab()
         if tab:
             tab._entry.delete(0, "end")

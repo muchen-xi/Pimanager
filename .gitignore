@@ -25,3 +25,11 @@ Thumbs.db
 
 # 打包输出
 dist/
+build/
+*.egg-info/
+
+# Claude Code
+.claude/
+
+# 风格参考（私用）
+_style_ref/

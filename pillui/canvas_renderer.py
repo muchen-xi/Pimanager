@@ -1,43 +1,42 @@
 """
 PageCanvas — 全页面 Canvas + 组件管理 + 事件分发
-
-每个页面（状态/设置/文件/终端/侧边栏）包含一个 PageCanvas。
-所有 Pillow 组件注册到 PageCanvas，由它统一渲染和事件分发。
 """
 import tkinter as tk
 from PIL import Image, ImageTk
 
-from .renderer import hex_to_rgba, create_layer, composite_layer, get_font
-from ._draw_utils import draw_rounded_rect, draw_text_aligned, text_bbox
+from .renderer import hex_to_rgba
+from .image_utils import fit_image
 
 
-# ============================================================
-#  BaseComponent — 所有 Pillow 组件的抽象基类
-# ============================================================
+# BaseComponent — 所有 Pillow 组件的抽象基类
 
 class BaseComponent:
     """所有 Pillow UI 组件的基类。"""
 
-    def __init__(self, x: int = 0, y: int = 0, w: int = 0, h: int = 0):
-        self.rect = (x, y, x + w, y + h)  # (x1, y1, x2, y2)
+    def __init__(self, x=0, y=0, w=0, h=0):
+        self.rect = (x, y, x + w, y + h)
         self.visible = True
-        self._parent: 'PageCanvas' = None
+        self._parent = None
 
-    # ---- 子类必须实现 ----
-
-    def draw(self, cw: int, ch: int) -> Image.Image:
-        """在透明图层上绘制组件，返回 PIL Image。
-
-        cw, ch = 整个 PageCanvas 的尺寸。组件的 rect 是绝对坐标。
+    def draw(self, cw, ch, font_scale=1.0):
+        """
+        在透明图层上绘制组件，返回 PIL Image
+        :param cw: 整个 PageCanvas 的宽度
+        :param ch: 整个 PageCanvas 的高度
+        :param font_scale: 字体缩放因子
+        :return: PIL RGBA Image 图层
         """
         raise NotImplementedError
 
-    def hit_test(self, mx: int, my: int) -> bool:
-        """判断鼠标坐标 (mx, my) 是否在组件范围内。"""
+    def hit_test(self, mx, my):
+        """
+        判断鼠标坐标是否在组件范围内
+        :param mx: 鼠标 x 坐标
+        :param my: 鼠标 y 坐标
+        :return: bool
+        """
         x1, y1, x2, y2 = self.rect
         return x1 <= mx <= x2 and y1 <= my <= y2
-
-    # ---- 可选覆盖 ----
 
     def on_click(self, event):
         """左键按下。"""
@@ -56,44 +55,59 @@ class BaseComponent:
         pass
 
     def on_drag(self, event):
-        """鼠标拖拽中（B1-Motion）。"""
+        """鼠标拖拽中。"""
         pass
 
     def on_mousewheel(self, event):
         """鼠标滚轮。"""
         pass
 
-    # ---- 属性 ----
+    def apply_theme(self, theme_colors):
+        """
+        应用主题颜色，子类重写以更新自身的颜色属性
+        :param theme_colors: ThemeColors 类
+        """
+        pass
 
     @property
-    def x(self): return self.rect[0]
+    def x(self):
+        return self.rect[0]
 
     @property
-    def y(self): return self.rect[1]
+    def y(self):
+        return self.rect[1]
 
     @property
-    def w(self): return self.rect[2] - self.rect[0]
+    def w(self):
+        return self.rect[2] - self.rect[0]
 
     @property
-    def h(self): return self.rect[3] - self.rect[1]
+    def h(self):
+        return self.rect[3] - self.rect[1]
 
-    def set_pos(self, x: int, y: int):
-        """更新位置。"""
+    def set_pos(self, x, y):
+        """
+        更新组件位置
+        :param x: 新 x 坐标
+        :param y: 新 y 坐标
+        """
         w, h = self.w, self.h
         self.rect = (x, y, x + w, y + h)
 
-    def set_size(self, w: int, h: int):
-        """更新尺寸。"""
+    def set_size(self, w, h):
+        """
+        更新组件尺寸
+        :param w: 新宽度
+        :param h: 新高度
+        """
         x, y = self.x, self.y
         self.rect = (x, y, x + w, y + h)
 
 
-# ============================================================
-#  PageCanvas — 主 Canvas：合成 + 事件 + 组件管理
-# ============================================================
+# PageCanvas — 主 Canvas：合成 + 事件 + 组件管理
 
 class PageCanvas(tk.Canvas):
-    """一个全页面 Canvas，管理 Pillow 组件的渲染和交互。
+    """全页面 Canvas，管理 Pillow 组件的渲染和交互。
 
     使用方式:
       canvas = PageCanvas(master, width=800, height=600)
@@ -102,50 +116,60 @@ class PageCanvas(tk.Canvas):
       canvas.add("my_btn", btn)
       canvas.grid(row=0, column=0, sticky="nsew")
 
-    组件按 add 顺序叠加（后加的在上层），hit-test 从上层开始。
+    组件按 add 顺序叠加，hit-test 从上层开始。
     """
 
-    def __init__(self, master, width: int = 400, height: int = 300, **kwargs):
+    def __init__(self, master, width=400, height=300, **kwargs):
         super().__init__(master, width=width, height=height,
                          highlightthickness=0, bd=0, **kwargs)
 
-        self._components: dict[str, BaseComponent] = {}
-        self._bg_color: str = "#0D1117"
-        self._bg_image: Image.Image = None
-        self._dirty: bool = False
-        self._tk_image_ref = None  # 保持 PhotoImage 引用不回收
-        self._hovered: str = None  # 当前悬停组件 ID
+        self._components = {}
+        self._bg_color = '#0D1117'
+        self._bg_image = None
+        self._fit_mode = 'cover'
+        self._dirty = False
+        self._tk_image_ref = None
+        self._hovered = None
+        self._font_scale = 1.0
+        self._idle_id = None
 
-        # 字体缩放
-        self._font_scale: float = 1.0
-        self._idle_id = None  # after_idle 令牌，用于取消待执行的渲染
+        # 绑定鼠标/窗口事件
+        self.bind('<Button-1>', self._on_click)
+        self.bind('<B1-Motion>', self._on_drag)
+        self.bind('<ButtonRelease-1>', self._on_release)
+        self.bind('<Motion>', self._on_motion)
+        self.bind('<MouseWheel>', self._on_mousewheel)
+        self.bind('<Configure>', self._on_resize)
 
-        # 绑定事件
-        self.bind("<Button-1>", self._on_click)
-        self.bind("<B1-Motion>", self._on_drag)
-        self.bind("<ButtonRelease-1>", self._on_release)
-        self.bind("<Motion>", self._on_motion)
-        self.bind("<MouseWheel>", self._on_mousewheel)
-        self.bind("<Configure>", self._on_resize)
+    # 组件管理
 
-    # ========== 组件管理 ==========
-
-    def add(self, comp_id: str, comp: BaseComponent):
-        """注册一个组件。comp_id 必须唯一。"""
+    def add(self, comp_id, comp):
+        """
+        注册组件
+        :param comp_id: 唯一组件 ID
+        :param comp: BaseComponent 实例
+        """
         comp._parent = self
         self._components[comp_id] = comp
         self.mark_dirty()
 
-    def remove(self, comp_id: str):
-        """移除一个组件。"""
+    def remove(self, comp_id):
+        """
+        移除组件
+        :param comp_id: 组件 ID
+        """
         if comp_id in self._components:
             del self._components[comp_id]
             if self._hovered == comp_id:
                 self._hovered = None
             self.mark_dirty()
 
-    def get(self, comp_id: str) -> BaseComponent:
-        """获取组件。"""
+    def get(self, comp_id):
+        """
+        获取组件
+        :param comp_id: 组件 ID
+        :return: BaseComponent 或 None
+        """
         return self._components.get(comp_id)
 
     def clear(self):
@@ -154,24 +178,51 @@ class PageCanvas(tk.Canvas):
         self._hovered = None
         self.mark_dirty()
 
-    # ========== 背景 ==========
+    # 背景
 
-    def set_bg_color(self, color: str):
-        """设置背景颜色（hex）。"""
+    def set_bg_color(self, color):
+        """
+        设置背景颜色
+        :param color: hex 颜色字符串
+        """
         self._bg_color = color
         self._bg_image = None
         self.mark_dirty()
 
-    def set_bg_image(self, pil_image: Image.Image):
-        """设置背景图片（PIL Image）。"""
+    def set_bg_image(self, pil_image, fit_mode='cover'):
+        """
+        设置背景图片
+        :param pil_image: PIL Image 对象
+        :param fit_mode: 适配模式 cover/contain/fill/tile
+        """
         self._bg_image = pil_image
+        self._fit_mode = fit_mode
         self.mark_dirty()
 
-    def get_bg_image(self) -> Image.Image:
-        """获取当前背景图。"""
+    def get_bg_image(self):
+        """
+        获取当前背景图
+        :return: PIL Image 或 None
+        """
         return self._bg_image
 
-    # ========== 渲染 ==========
+    def set_fit_mode(self, mode):
+        """
+        设置背景适配模式
+        :param mode: cover/contain/fill/tile
+        """
+        self._fit_mode = mode
+        if self._bg_image:
+            self.mark_dirty()
+
+    def get_fit_mode(self):
+        """
+        获取当前背景适配模式
+        :return: 适配模式字符串
+        """
+        return self._fit_mode
+
+    # 渲染
 
     def mark_dirty(self):
         """标记需要重绘。取消前一个待执行 idle，避免堆积。"""
@@ -180,7 +231,12 @@ class PageCanvas(tk.Canvas):
             self._idle_id = None
         if not self._dirty:
             self._dirty = True
-        self._idle_id = self.after_idle(self.render)
+        self._idle_id = self.after(16, self._do_render)
+
+    def _do_render(self):
+        """执行实际渲染 (~60fps 节流)。"""
+        self._idle_id = None
+        self.render()
 
     def render(self):
         """合成所有组件 → 显示到 Canvas。"""
@@ -190,35 +246,38 @@ class PageCanvas(tk.Canvas):
         cw = self.winfo_width()
         ch = self.winfo_height()
         if cw < 20 or ch < 20:
-            # Canvas 尚未就绪 → 重新标记脏，100ms 后重试
+            self._retry_count = getattr(self, '_retry_count', 0) + 1
+            if self._retry_count > 30:
+                return
             self._dirty = True
             self._idle_id = self.after(100, self.render)
             return
+        self._retry_count = 0
 
         # Layer 0: 背景
         if self._bg_image:
-            bg = self._bg_image.resize((cw, ch), Image.LANCZOS)
-            base = bg.convert("RGBA") if bg.mode != "RGBA" else bg
+            bg = fit_image(self._bg_image, cw, ch, self._fit_mode)
+            base = bg.convert('RGBA') if bg.mode != 'RGBA' else bg
         else:
-            base = Image.new("RGBA", (cw, ch),
+            base = Image.new('RGBA', (cw, ch),
                              hex_to_rgba(self._bg_color))
 
-        # Layer 1..N: 组件
+        # Layer 1..N: 组件逐层叠加
         for comp in self._components.values():
             if comp.visible:
                 try:
-                    layer = comp.draw(cw, ch)
-                    if layer and layer.mode == "RGBA":
+                    layer = comp.draw(cw, ch, font_scale=self._font_scale)
+                    if layer and layer.mode == 'RGBA':
                         base = Image.alpha_composite(base, layer)
                 except Exception as e:
-                    print(f"[PageCanvas] {type(comp).__name__} draw error: {e}")
+                    print('[PageCanvas] %s draw error: %s' % (type(comp).__name__, e))
 
-        # 显示
+        # 显示到 tk Canvas
         self._tk_image_ref = ImageTk.PhotoImage(base)
-        self.delete("all")
-        self.create_image(0, 0, anchor="nw", image=self._tk_image_ref)
+        self.delete('all')
+        self.create_image(0, 0, anchor='nw', image=self._tk_image_ref)
 
-    # ========== 事件分发 ==========
+    # 事件分发
 
     def _on_click(self, event):
         """左键按下 — 从上到下 hit-test。"""
@@ -243,7 +302,7 @@ class PageCanvas(tk.Canvas):
                 comp.on_release(event)
 
     def _on_motion(self, event):
-        """鼠标移动 — 跟踪 hover 状态。"""
+        """鼠标移动 — 跟踪 hover 状态变化。"""
         new_hover = None
         for comp_id in reversed(list(self._components.keys())):
             comp = self._components[comp_id]
@@ -273,15 +332,35 @@ class PageCanvas(tk.Canvas):
                 comp.on_mousewheel(event)
 
     def _on_resize(self, event):
-        """窗口大小改变 → 延迟重绘。"""
-        self.after(80, self.mark_dirty)
+        """窗口大小改变 → 立即安排重绘。"""
+        self.mark_dirty()
 
-    # ========== 工具 ==========
+    # 工具
 
-    def set_font_scale(self, scale: float):
-        """设置字体缩放因子。"""
+    def apply_theme(self, theme_colors=None):
+        """
+        将主题颜色传播到所有组件并触发重绘
+        :param theme_colors: ThemeColors 类，若未传则自动导入
+        """
+        if theme_colors is None:
+            try:
+                from pimanager.theme import ThemeColors as tc
+                theme_colors = tc
+            except ImportError:
+                return
+        for comp in self._components.values():
+            if hasattr(comp, 'apply_theme'):
+                comp.apply_theme(theme_colors)
+        self.mark_dirty()
+
+    def set_font_scale(self, scale):
+        """
+        设置字体缩放因子
+        :param scale: 缩放比例
+        """
         self._font_scale = float(scale)
+        self.mark_dirty()
 
     @property
-    def font_scale(self) -> float:
+    def font_scale(self):
         return self._font_scale

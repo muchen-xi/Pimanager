@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import os
 
+from . import __version__
 from .theme import ThemeColors
 from .pillui import (PageCanvas, PillowButton, PillowLabel,
                      PillowProgressBar, PillowCard)
@@ -14,10 +15,10 @@ from .pillui.option_menu import PillowOptionMenu
 from .app import BackgroundManager
 
 
+# 应用设置页面 — 全 Pillow 渲染
 class SettingsPage(tk.Frame):
-    """应用设置页面 — 全 Pillow 渲染。"""
 
-    def __init__(self, master, config: dict, ssh_client=None, app_ref=None):
+    def __init__(self, master, config, ssh_client=None, app_ref=None):
         super().__init__(master, bg=ThemeColors.get("bg"))
         self._config = config
         self._ssh = ssh_client
@@ -35,8 +36,6 @@ class SettingsPage(tk.Frame):
         self._build_background_card()
         self._build_behavior_card()
         self._build_about_card()
-
-        self._canvas.render()
 
     # ===== 外观卡片 =====
 
@@ -69,7 +68,8 @@ class SettingsPage(tk.Frame):
         c.add("color_menu",
               PillowOptionMenu(380, y0 + 77, 120, 28,
                                values=["green", "blue", "dark-blue"],
-                               variable=self._color_var))
+                               variable=self._color_var,
+                               command=self._on_color_theme_change))
 
         # 字体缩放
         self._scale_var = tk.DoubleVar(
@@ -93,22 +93,22 @@ class SettingsPage(tk.Frame):
         y0 = 190
 
         c.add("bg_card",
-              PillowCard(10, y0, 540, 170, title="🖼️ 背景设置",
+              PillowCard(10, y0, 540, 190, title="🖼️ 背景设置",
                          fill="#161B22", border="gray30"))
 
         # 当前背景
         bg_path = self._config["appearance"].get("background_path", "")
         display = os.path.basename(bg_path) if bg_path else "未设置"
-        self._bg_label = PillowLabel(f"当前: {display}", 24, y0 + 40, 300, 24,
+        self._bg_label = PillowLabel(f"当前: {display}", 24, y0 + 36, 300, 24,
                                      font_size=12, color="#8B949E")
         c.add("bg_path", self._bg_label)
 
         # 选择/清除按钮
         c.add("btn_choose_bg",
-              PillowButton("📂 选择图片", 24, y0 + 72, 120, 28,
+              PillowButton("📂 选择图片", 24, y0 + 62, 120, 28,
                            command=self._choose_bg, font_size=11))
         c.add("btn_clear_bg",
-              PillowButton("🗑 清除背景", 154, y0 + 72, 120, 28,
+              PillowButton("🗑 清除背景", 154, y0 + 62, 120, 28,
                            command=self._clear_bg,
                            style="transparent", font_size=11))
 
@@ -116,22 +116,34 @@ class SettingsPage(tk.Frame):
         self._opacity_var = tk.DoubleVar(
             value=self._config["appearance"]["background_opacity"])
         c.add("opacity_label",
-              PillowLabel("背景透明度", 24, y0 + 112, 100, 24,
+              PillowLabel("背景透明度", 24, y0 + 96, 100, 24,
                           font_size=12, color="#C9D1D9"))
         c.add("opacity_slider",
-              PillowSlider(140, y0 + 114, 260, 24,
+              PillowSlider(140, y0 + 98, 260, 24,
                            from_val=0.05, to_val=0.5, steps=9,
                            variable=self._opacity_var,
                            command=self._on_opacity_change))
-        self._opacity_pct = PillowLabel("15%", 410, y0 + 112, 60, 24,
+        self._opacity_pct = PillowLabel("15%", 410, y0 + 96, 60, 24,
                                         font_size=12, color="#8B949E")
         c.add("opacity_pct", self._opacity_pct)
+
+        # 背景适配模式
+        fit_mode = self._config["appearance"].get("background_fit_mode", "cover")
+        self._fit_var = tk.StringVar(value=fit_mode)
+        c.add("fit_label",
+              PillowLabel("适配模式", 24, y0 + 128, 100, 24,
+                          font_size=12, color="#C9D1D9"))
+        c.add("fit_menu",
+              PillowOptionMenu(140, y0 + 126, 130, 28,
+                               values=["cover", "contain", "fill", "tile"],
+                               variable=self._fit_var,
+                               command=self._on_fit_change))
 
     # ===== 行为卡片 =====
 
     def _build_behavior_card(self):
         c = self._canvas
-        y0 = 370
+        y0 = 390
 
         c.add("behavior_card",
               PillowCard(10, y0, 540, 155, title="⚡ 行为设置",
@@ -170,13 +182,13 @@ class SettingsPage(tk.Frame):
 
     def _build_about_card(self):
         c = self._canvas
-        y0 = 535
+        y0 = 555
 
         c.add("about_card",
               PillowCard(10, y0, 540, 100, title="ℹ️ 关于",
                          fill="#161B22", border="gray30"))
 
-        info = "PiManager v2.0.0\n轻量级树莓派 Zero W 桌面管理器\nPython + tkinter + Pillow + Paramiko\n深色/浅色双主题 · Canvas 原生渲染"
+        info = 'PiManager v' + __version__ + '\n轻量级树莓派 Zero W 桌面管理器\nPython + tkinter + Pillow + Paramiko\n深色/浅色双主题 · Canvas 原生渲染'
         c.add("about_text",
               PillowLabel(info, 24, y0 + 38, 400, 70,
                           font_size=11, color="#8B949E"))
@@ -187,13 +199,20 @@ class SettingsPage(tk.Frame):
 
     # ===== 事件处理 =====
 
-    def _on_theme_change(self, theme: str):
+    def _on_theme_change(self, theme):
+        """主题切换 — 立即应用，无延迟，消除闪烁。"""
         ThemeColors.set_mode(theme)
         if self._app:
-            self._app.after(200, lambda: self._app._apply_background(force=True))
-            self._app.after(300, self._app.refresh_all_canvases)
+            self._app._apply_background()
+            self._app.refresh_all_canvases()
 
-    def _on_scale_change(self, val: float):
+    def _on_color_theme_change(self, color_name):
+        """颜色主题切换。"""
+        ThemeColors.set_color_theme(color_name)
+        if self._app:
+            self._app.refresh_all_canvases()
+
+    def _on_scale_change(self, val):
         self._scale_pct.set_text(f"{val:.1f}x")
         ThemeColors.set_font_scale(float(val))
         if self._app:
@@ -202,13 +221,17 @@ class SettingsPage(tk.Frame):
                 self.after_cancel(self._scale_debounce_id)
             self._scale_debounce_id = self.after(100, self._app.refresh_all_canvases)
 
-    def _on_opacity_change(self, val: float):
+    def _on_opacity_change(self, val):
         self._opacity_pct.set_text(f"{int(val * 100)}%")
         self._config["appearance"]["background_opacity"] = float(val)
         if self._app:
-            self._app._apply_background(force=True)
+            self._app._apply_background()
 
-    def _on_refresh_change(self, val: int):
+    def _on_fit_change(self, mode):
+        self._config["appearance"]["background_fit_mode"] = mode
+        BackgroundManager.set_fit_mode(mode)
+
+    def _on_refresh_change(self, val):
         self._refresh_pct.set_text(f"{int(val)}秒")
 
     def _choose_bg(self):
@@ -220,7 +243,7 @@ class SettingsPage(tk.Frame):
             self._config["appearance"]["background_path"] = path
             self._bg_label.set_text(f"当前: {os.path.basename(path)}")
             if self._app:
-                self._app._apply_background(force=True)
+                self._app._apply_background()
 
     def _clear_bg(self):
         self._config["appearance"]["background_path"] = ""
@@ -235,6 +258,7 @@ class SettingsPage(tk.Frame):
             "color_theme": self._color_var.get(),
             "font_scale": float(self._scale_var.get()),
             "background_opacity": float(self._opacity_var.get()),
+            "background_fit_mode": self._fit_var.get(),
         })
         self._config["behavior"].update({
             "auto_connect": bool(self._auto_var.get()),
@@ -249,6 +273,7 @@ class SettingsPage(tk.Frame):
             messagebox.showerror("保存失败", str(e))
 
     def refresh_theme(self):
-        """主题切换时重绘。"""
+        """主题切换时重绘所有组件。"""
+        self._canvas.apply_theme()
         self._canvas.set_bg_color(ThemeColors.get("bg"))
         self._canvas.render()

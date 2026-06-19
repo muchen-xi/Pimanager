@@ -16,10 +16,10 @@ from .app import BackgroundManager
 #  Canvas 文件列表
 # ============================================================
 
+# Canvas 渲染的文件列表基类
 class _CanvasListBase(tk.Frame):
-    """Canvas 渲染的文件列表基类。"""
 
-    def __init__(self, master, is_local: bool = False, **kw):
+    def __init__(self, master, is_local=False, **kw):
         super().__init__(master, bg=ThemeColors.get("bg"), **kw)
         self._is_local = is_local
         self._items = []
@@ -37,7 +37,7 @@ class _CanvasListBase(tk.Frame):
         self._canvas.bind("<Configure>", lambda e: self._redraw())
         # 背景由 FileBrowser._list_container 统一管理，不单独注册
 
-    def set_items(self, items: list):
+    def set_items(self, items):
         self._items = items
         self._scroll_y = 0
         self._redraw()
@@ -65,10 +65,11 @@ class _CanvasListBase(tk.Frame):
         if 0 <= idx < len(self._items) and hasattr(self, 'on_rightclick'):
             self.on_rightclick(self._items[idx], idx, event)
 
-    def _row_at(self, y: int) -> int:
+    def _row_at(self, y):
         return (y + self._scroll_y) // 28
 
     def _redraw(self):
+        """使用原始 tk.Canvas 绘制文件列表（非 pillui，因为是逐行列表项 + 自定义选中高亮）。"""
         c = self._canvas
         c.delete("all")
         cw = c.winfo_width() or 400
@@ -124,7 +125,7 @@ class _CanvasListBase(tk.Frame):
             c.create_text(name_w + size_w + 10, y + 5, text=str(mt)[:14],
                           anchor="nw", fill=s, font=font_info)
 
-    def get_selected(self) -> dict:
+    def get_selected(self):
         if self._selected is not None and 0 <= self._selected < len(self._items):
             return self._items[self._selected]
         return None
@@ -134,11 +135,13 @@ class _CanvasListBase(tk.Frame):
         self._redraw()
 
 
+# 远程文件列表（Canvas 渲染，非 pillui）
 class CanvasFileList(_CanvasListBase):
     def __init__(self, master, **kw):
         super().__init__(master, is_local=False, **kw)
 
 
+# 本地文件列表（Canvas 渲染，非 pillui）
 class LocalFileList(_CanvasListBase):
     def __init__(self, master, **kw):
         super().__init__(master, is_local=True, **kw)
@@ -166,13 +169,14 @@ class LocalFileList(_CanvasListBase):
                 entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
                 if self._load_token == token:
                     self.after(0, lambda: self.set_items(entries))
-            except Exception:
+            except Exception as e:
+                print(f"本地目录加载失败: {e}")
                 if self._load_token == token:
                     self.after(0, lambda: self.set_items([]))
 
         threading.Thread(target=_do, daemon=True).start()
 
-    def navigate(self, path: str):
+    def navigate(self, path):
         if os.path.isdir(path):
             self.current_path = path
             self._load()
@@ -190,10 +194,10 @@ class LocalFileList(_CanvasListBase):
 #  FileBrowser — 主控制器 (v3: 双栏 + 进度 + 运行)
 # ============================================================
 
+# 文件管理器 — 双栏模式 + 进度回调 + 一键运行
 class FileBrowser(tk.Frame):
-    """文件管理器 — 双栏模式 + 进度回调 + 一键运行。"""
 
-    def __init__(self, master, ssh_client, config: dict = None, app_ref=None):
+    def __init__(self, master, ssh_client, config=None, app_ref=None):
         super().__init__(master, bg=ThemeColors.get("bg"))
         self._ssh = ssh_client
         self._config = config or {}
@@ -258,8 +262,8 @@ class FileBrowser(tk.Frame):
         self._list_container.grid_columnconfigure(1, weight=0)
         self._list_container.grid_rowconfigure(0, weight=1)
 
-        # 容器统一注册背景（避免双栏各画一张重叠的背景图）
-        BackgroundManager.register(self._list_container)
+        # 背景由各 _CanvasListBase._redraw() 直接调用 apply_to_canvas(canvas) 绘制
+        # 不注册 _list_container (tk.Frame)，避免 BackgroundManager._refresh 调用 tk.Frame 的 Canvas 方法
 
         # 远程列表
         self._file_list = CanvasFileList(self._list_container)
@@ -315,8 +319,8 @@ class FileBrowser(tk.Frame):
             try:
                 items = self._ssh.list_dir(self._cwd)
                 self.after(0, lambda: self._file_list.set_items(items))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"远程目录列表获取失败: {e}")
         threading.Thread(target=_fetch, daemon=True).start()
 
     def _on_remote_dblclick(self, item, idx):
@@ -395,7 +399,7 @@ class FileBrowser(tk.Frame):
         local = os.path.join(self._local_list.current_path, sel['name'])
         self._do_transfer("upload", local, f"{self._cwd}/{sel['name']}")
 
-    def _do_transfer(self, direction: str, src: str, dst: str):
+    def _do_transfer(self, direction, src, dst):
         self._progress.pack(side="right", padx=10, pady=2)
         self._progress.configure(value=0)
         self._status_label.configure(text="上传中..." if direction == "upload" else "下载中...")
@@ -414,7 +418,7 @@ class FileBrowser(tk.Frame):
 
         threading.Thread(target=_do, daemon=True).start()
 
-    def _on_transfer_done(self, ok: bool, msg: str):
+    def _on_transfer_done(self, ok, msg):
         self._progress.pack_forget()
         self._status_label.configure(text="传输完成" if ok else f"失败: {msg}")
         self.after(3000, lambda: self._status_label.configure(text=""))
@@ -459,7 +463,7 @@ class FileBrowser(tk.Frame):
 
         threading.Thread(target=_do, daemon=True).start()
 
-    def _show_run_result(self, stdout: str, stderr: str, exit_code: int):
+    def _show_run_result(self, stdout, stderr, exit_code):
         dialog = tk.Toplevel(self)
         dialog.title("运行结果")
         dialog.geometry("700x500")
