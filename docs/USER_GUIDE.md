@@ -49,7 +49,7 @@ ssh-keygen -t ed25519 -C "pimanager"
 然后将公钥复制到树莓派：
 
 ```bash
-ssh-copy-id chenxi@muchenxi-20081128.local
+ssh-copy-id pi@raspberrypi.local
 ```
 
 **第三步：启动应用**
@@ -111,9 +111,9 @@ python -m pimanager.main
 | 字段 | 说明 | 默认值 |
 |------|------|--------|
 | 连接名称 | 自定义标识，仅用于显示 | 树莓派 |
-| 主机地址 | 树莓派的 IP 或主机名（支持 `.local` mDNS） | muchenxi-20081128.local |
+| 主机地址 | 树莓派的 IP 或主机名（支持 `.local` mDNS） | raspberrypi.local |
 | 端口 | SSH 端口号 | 22 |
-| 用户名 | 登录用户名 | chenxi |
+| 用户名 | 登录用户名 | pi |
 | 密钥路径 | SSH 私钥文件路径 | C:\Users\\<用户名>\\.ssh\id_ed25519 |
 
 3. 点击密钥路径右侧的 **📂** 按钮可以浏览并选择密钥文件。对话框默认打开 `~/.ssh` 目录，支持以下文件类型：
@@ -163,9 +163,9 @@ python -m pimanager.main
   "connections": [
     {
       "name": "树莓派 Zero W",
-      "host": "muchenxi-20081128.local",
+      "host": "raspberrypi.local",
       "port": 22,
-      "username": "chenxi",
+      "username": "pi",
       "key_path": "C:\\Users\\...\\.ssh\\id_ed25519",
       "use_key": true
     }
@@ -658,7 +658,7 @@ PiManager 的背景并非简单叠加，而是采用**图层混合**技术：
 
 1. 确保 SSH 密钥文件路径正确，推荐使用 ed25519 密钥
 2. 主机地址可使用：
-   - mDNS 主机名：`muchenxi-20081128.local`（需要在同一局域网）
+   - mDNS 主机名：`raspberrypi.local`（需要在同一局域网）
    - IP 地址：`192.168.x.x`（更可靠，但 IP 可能变动）
 3. 端口保持默认 `22`
 
@@ -721,7 +721,7 @@ sudo systemctl restart ssh
 
 1. **检查网络连通性**：在终端中 ping 树莓派地址
    ```bash
-   ping muchenxi-20081128.local
+   ping raspberrypi.local
    ```
    如果 ping 不通，检查两台设备是否在同一局域网。
 
@@ -920,9 +920,9 @@ who
   "connections": [
     {
       "name": "树莓派 Zero W",
-      "host": "muchenxi-20081128.local",
+      "host": "raspberrypi.local",
       "port": 22,
-      "username": "chenxi",
+      "username": "pi",
       "key_path": "C:\\Users\\用户名\\.ssh\\id_ed25519",
       "use_key": true
     }

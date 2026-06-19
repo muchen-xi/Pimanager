@@ -236,7 +236,7 @@ class FileBrowser(tk.Frame):
         self._ssh = ssh_client
         self._config = config or {}
         self._app = app_ref
-        self._cwd = "/home/chenxi"
+        self._cwd = "/home/pi"
         self._mode = "single"
         self._local_path = os.path.expanduser("~")
 
