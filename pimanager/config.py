@@ -7,7 +7,21 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-CONFIG_DIR = Path(__file__).parent
+def _get_config_dir():
+    """返回可写的配置目录。
+
+    PyInstaller 打包后 __file__ 指向只读的 _MEIPASS 临时目录，
+    此时重定向到 %USERPROFILE%\.pimanager。
+    开发模式下继续使用源码旁的 pimanager/ 子目录。
+    """
+    import sys as _sys
+    if getattr(_sys, 'frozen', False):
+        user_dir = Path.home() / '.pimanager'
+        user_dir.mkdir(parents=True, exist_ok=True)
+        return user_dir
+    return Path(__file__).resolve().parent
+
+CONFIG_DIR = _get_config_dir()
 CONFIG_FILE = CONFIG_DIR / 'pimanager.json'
 CONFIG_BACKUP_DIR = CONFIG_DIR / 'config_backups'
 
