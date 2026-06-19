@@ -4,7 +4,7 @@ PillowCard — 圆角卡片容器组件
 from PIL import Image, ImageDraw
 
 from .canvas_renderer import BaseComponent
-from .renderer import hex_to_rgba, hex_to_rgb, get_font, create_layer, create_text_layer
+from .renderer import hex_to_rgba, hex_to_rgb, get_font, create_layer
 
 
 class PillowCard(BaseComponent):
@@ -21,8 +21,8 @@ class PillowCard(BaseComponent):
         self.title_size = title_size
 
     def draw(self, cw, ch, font_scale=1.0):
-        # 使用卡片的填充色作为图层背景，使文字抗锯齿正确
-        layer = create_text_layer(cw, ch, self.fill_color)
+        # 透明图层：仅卡片的 rect 区域不透明，不再覆盖整幅画布
+        layer = create_layer(cw, ch)
         draw = ImageDraw.Draw(layer)
         x1, y1, x2, y2 = self.rect
 

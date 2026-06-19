@@ -5,7 +5,7 @@ import tkinter as tk
 from PIL import Image, ImageDraw
 
 from .canvas_renderer import BaseComponent
-from .renderer import hex_to_rgba, hex_to_rgb, get_font, create_layer, create_text_layer
+from .renderer import hex_to_rgba, hex_to_rgb, get_font, create_layer
 
 
 # 选项菜单颜色 — 模块级，apply_theme() 时更新
@@ -26,8 +26,8 @@ class PillowOptionMenu(BaseComponent):
         self.command = command
 
     def draw(self, cw, ch, font_scale=1.0):
-        # 使用 bg 颜色作为图层背景，使文字抗锯齿正确
-        layer = create_text_layer(cw, ch, _OPTION_BG)
+        # 透明图层：仅菜单的 rect 区域不透明，不再覆盖整幅画布
+        layer = create_layer(cw, ch)
         draw = ImageDraw.Draw(layer)
         x1, y1, x2, y2 = self.rect
 
