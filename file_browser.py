@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 
 from .theme import ThemeColors
+from .app import BackgroundManager
 
 # ============================================================
 #  Canvas 文件列表
@@ -27,6 +28,7 @@ class _CanvasListBase(tk.Frame):
         self._canvas = tk.Canvas(self, bg=ThemeColors.get("bg"),
                                  highlightthickness=0, bd=0)
         self._canvas.pack(fill="both", expand=True)
+        self._bg_cache_key = None
 
         self._canvas.bind("<MouseWheel>", self._on_mousewheel)
         self._canvas.bind("<Button-1>", self._on_click)
@@ -66,11 +68,45 @@ class _CanvasListBase(tk.Frame):
     def _row_at(self, y):
         return (y + self._scroll_y) // 28
 
+    def _apply_background(self):
+        """位置感知背景裁剪 — 每个 Canvas 显示背景图的对应区域"""
+        c = self._canvas
+        cw = c.winfo_width()
+        ch = c.winfo_height()
+        if cw < 20 or ch < 20:
+            return
+
+        # 容器尺寸
+        container = self.master
+        container_w = container.winfo_width()
+        container_h = container.winfo_height()
+        if container_w < 20 or container_h < 20:
+            return
+
+        # 本 Canvas 在容器内的偏移
+        offset_x = self.winfo_x() + c.winfo_x()
+        offset_y = self.winfo_y() + c.winfo_y()
+
+        # 缓存检查：布局/图片不变则跳过
+        cache_key = (container_w, container_h, offset_x, offset_y, cw, ch,
+                     id(BackgroundManager._blended))
+        if cache_key == self._bg_cache_key:
+            return
+        self._bg_cache_key = cache_key
+
+        if BackgroundManager._blended is None:
+            c.delete("bg_image")
+            return
+
+        BackgroundManager.apply_to_canvas_positioned(
+            c, (container_w, container_h), (offset_x, offset_y))
+
     def _redraw(self):
         """使用原始 tk.Canvas 绘制文件列表（非 pillui，因为是逐行列表项 + 自定义选中高亮）。"""
         c = self._canvas
-        c.delete("all")
+        c.delete("list_item")
         cw = c.winfo_width() or 400
+        self._apply_background()
         # Canvas uses solid theme background color — no background image applied
         s = ThemeColors.get("text_secondary")
         name_color = "#0969DA" if self._is_local else "#8BCCFF"
@@ -90,7 +126,7 @@ class _CanvasListBase(tk.Frame):
                 continue
 
             if i == self._selected:
-                c.create_rectangle(0, y, cw, y + 28, fill=sel_bg, outline="")
+                c.create_rectangle(0, y, cw, y + 28, fill=sel_bg, outline="", tags="list_item")
 
             icon = "DIR" if item.get("is_dir") else "   "
             name = item.get("name", "?")
@@ -99,7 +135,7 @@ class _CanvasListBase(tk.Frame):
             if len(display) > max_ch:
                 display = display[:max_ch - 1] + ".."
             c.create_text(8, y + 5, text=display, anchor="nw",
-                          fill=name_color, font=font_name)
+                          fill=name_color, font=font_name, tags="list_item")
 
             if not item.get("is_dir"):
                 sz = item.get("size", 0)
@@ -110,7 +146,7 @@ class _CanvasListBase(tk.Frame):
                 else:
                     sz_t = str(sz)
                 c.create_text(name_w + 10, y + 5, text=sz_t,
-                              anchor="nw", fill=s, font=font_info)
+                              anchor="nw", fill=s, font=font_info, tags="list_item")
 
             mt = item.get("mtime", "")
             if mt:
@@ -120,7 +156,7 @@ class _CanvasListBase(tk.Frame):
                 except Exception:
                     pass
             c.create_text(name_w + size_w + 10, y + 5, text=str(mt)[:14],
-                          anchor="nw", fill=s, font=font_info)
+                          anchor="nw", fill=s, font=font_info, tags="list_item")
 
     def get_selected(self):
         if self._selected is not None and 0 <= self._selected < len(self._items):
@@ -129,6 +165,7 @@ class _CanvasListBase(tk.Frame):
 
     def refresh_theme(self):
         self._canvas.configure(bg=ThemeColors.get("bg"))
+        self._bg_cache_key = None
         self._redraw()
 
 
