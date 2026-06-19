@@ -146,7 +146,7 @@ class SettingsPage(tk.Frame):
         y0 = 390
 
         c.add("behavior_card",
-              PillowCard(10, y0, 540, 155, title="行为设置",
+              PillowCard(10, y0, 540, 195, title="行为设置",
                          fill="#161B22", border="#4D4D4D"))
 
         # 自动连接
@@ -177,6 +177,12 @@ class SettingsPage(tk.Frame):
         c.add("confirm_check",
               PillowCheckBox("删除文件前弹出确认对话框", 24, y0 + 108, 300, 24,
                              variable=self._confirm_var))
+
+        self._drift_global_var = tk.BooleanVar(
+            value=self._config["behavior"].get("ip_drift_detection", True))
+        c.add("drift_global_check",
+              PillowCheckBox("启用IP漂移自动检测", 24, y0 + 140, 300, 24,
+                             variable=self._drift_global_var))
 
     # ===== 关于卡片 =====
 
@@ -264,6 +270,7 @@ class SettingsPage(tk.Frame):
             "auto_connect": bool(self._auto_var.get()),
             "refresh_interval": int(self._refresh_var.get()),
             "confirm_before_delete": bool(self._confirm_var.get()),
+            "ip_drift_detection": bool(self._drift_global_var.get()),
         })
 
         try:

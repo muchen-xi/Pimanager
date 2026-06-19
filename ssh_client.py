@@ -6,6 +6,8 @@ import threading
 import time
 import os
 import stat
+import socket
+import ipaddress
 import paramiko
 
 
@@ -68,6 +70,7 @@ class SSHClient:
         self._keep_alive_job = None
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = 3
+        self._auto_rediscover = False
 
     @property
     def connected(self):
@@ -76,6 +79,31 @@ class SSHClient:
     @property
     def host(self):
         return self._host
+
+    def set_auto_rediscover(self, enabled):
+        """启用/禁用IP漂移自动修复"""
+        self._auto_rediscover = bool(enabled)
+
+    def _resolve_hostname(self, host, port=22):
+        """
+        解析主机名到IP地址
+        :param host: 主机名或IP
+        :param port: 端口
+        :return: (ip地址, 原始主机名) 或 (None, host) 解析失败时
+        """
+        try:
+            ipaddress.ip_address(host)
+            return host, None
+        except ValueError:
+            pass
+
+        try:
+            addrinfo = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+            if addrinfo:
+                return addrinfo[0][4][0], host
+        except socket.gaierror:
+            pass
+        return None, host
 
     def connect(self, host, port=22, username='pi',
                 key_path=None, password=None, timeout=10):
@@ -195,18 +223,28 @@ class SSHClient:
             self._key_path, self._password)
 
     def _auto_reconnect(self):
-        """自动重连（带退避策略）。"""
+        """自动重连（带退避策略 + IP漂移检测）。"""
         if self._reconnect_attempts >= self._max_reconnect_attempts:
             print(f"已达最大重连次数 ({self._max_reconnect_attempts})")
             return False
         self._reconnect_attempts += 1
+
+        actual_host = self._host
+        if self._auto_rediscover:
+            resolved, _ = self._resolve_hostname(self._host, self._port)
+            if resolved and resolved != self._host:
+                actual_host = resolved
+                print(f"IP漂移修复 ({self._reconnect_attempts}/{self._max_reconnect_attempts}): "
+                      f"{self._host} -> {actual_host}")
+
         # 指数退避：1s, 2s, 4s
         delay = 2 ** (self._reconnect_attempts - 1)
-        print(f"等待 {delay}s 后重连...")
         time.sleep(delay)
-        ok, msg = self.reconnect()
+        ok, msg = self.connect(actual_host, self._port, self._username,
+                               self._key_path, self._password)
         if ok:
             self._reconnect_attempts = 0
+            self._host = actual_host
         return ok
 
     def exec_command(self, command, timeout=30):

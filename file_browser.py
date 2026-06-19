@@ -9,8 +9,6 @@ import os
 from datetime import datetime
 
 from .theme import ThemeColors
-from .app import BackgroundManager
-
 
 # ============================================================
 #  Canvas 文件列表
@@ -73,8 +71,7 @@ class _CanvasListBase(tk.Frame):
         c = self._canvas
         c.delete("all")
         cw = c.winfo_width() or 400
-        BackgroundManager.apply_to_canvas(c)
-
+        # Canvas uses solid theme background color — no background image applied
         s = ThemeColors.get("text_secondary")
         name_color = "#0969DA" if self._is_local else "#8BCCFF"
         sel_bg = ThemeColors.get("canvas_selection")
@@ -262,8 +259,8 @@ class FileBrowser(tk.Frame):
         self._list_container.grid_columnconfigure(1, weight=0)
         self._list_container.grid_rowconfigure(0, weight=1)
 
-        # 背景由各 _CanvasListBase._redraw() 直接调用 apply_to_canvas(canvas) 绘制
-        # 不注册 _list_container (tk.Frame)，避免 BackgroundManager._refresh 调用 tk.Frame 的 Canvas 方法
+        # Canvas backgrounds use solid theme color (no background image applied here)
+
 
         # 远程列表
         self._file_list = CanvasFileList(self._list_container)

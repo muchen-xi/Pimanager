@@ -532,6 +532,9 @@ class PiManagerApp(tk.Tk):
         self._connect_btn.set_text("连接中...")
         self._connect_btn.set_disabled(True)
 
+        auto_rediscover = self._config.get("connections", [{}])[0].get("auto_rediscover", False)
+        self._ssh.set_auto_rediscover(auto_rediscover)
+
         def _connect():
             kp = key_path if use_key and key_path else None
             pw = password if not use_key else None
@@ -711,7 +714,7 @@ class PiManagerApp(tk.Tk):
         """连接设置对话框 — 使用 tk.Toplevel。"""
         dialog = tk.Toplevel(self)
         dialog.title("连接设置")
-        dialog.geometry("450x380")
+        dialog.geometry("450x430")
         dialog.resizable(False, False)
         dialog.transient(self)
         dialog.grab_set()
@@ -763,8 +766,18 @@ class PiManagerApp(tk.Tk):
                  command=lambda: self._browse_key(key_entry)).grid(
             row=0, column=1, padx=(4, 0))
 
+        # IP漂移自动修复
+        conn = self._config.get("connections", [{}])[0]
+        self._drift_var = tk.BooleanVar(value=conn.get("auto_rediscover", False))
+        drift_check = tk.Checkbutton(content, text="自动修复IP漂移",
+                                     variable=self._drift_var,
+                                     bg=ThemeColors.get("bg"),
+                                     fg=ThemeColors.get("fg"),
+                                     selectcolor=ThemeColors.get("bg_card"))
+        drift_check.grid(row=5, column=1, sticky="w", pady=6)
+
         btn_frame = tk.Frame(content, bg=ThemeColors.get("bg"))
-        btn_frame.grid(row=6, column=0, columnspan=2, pady=10)
+        btn_frame.grid(row=7, column=0, columnspan=2, pady=10)
 
         def _save():
             self._config["connections"] = [{
@@ -774,6 +787,7 @@ class PiManagerApp(tk.Tk):
                 "username": entries["username"].get(),
                 "key_path": entries["key_path"].get(),
                 "use_key": bool(entries["key_path"].get()),
+                "auto_rediscover": bool(self._drift_var.get()),
             }]
             config.save_config(self._config)
             dialog.destroy()

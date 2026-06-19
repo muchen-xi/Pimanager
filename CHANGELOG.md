@@ -1,5 +1,18 @@
 # 更新日志
 
+## v2.2.0 (2026-06-19)
+
+### 新功能
+- **IP 漂移自动修复**：当树莓派 DHCP 更换 IP 时自动重新解析主机名并重连
+  - `ssh_client.py`：`_resolve_hostname()` 通过 `socket.getaddrinfo()` 重新解析，`_auto_reconnect()` 智能重试
+  - `config.py`：新增 `auto_rediscover`、`last_resolved_ip`、`ip_drift_detection` 配置项，v2→v3 自动迁移
+  - `app.py`：连接对话框添加「自动修复IP漂移」复选框
+  - `settings_page.py`：全局「启用IP漂移自动检测」开关
+  - 零新增依赖（`socket` + `ipaddress` 均为标准库）
+
+### 修复
+- 修复：文件管理双栏背景 — 移除独立 Canvas 的背景图应用，双栏使用纯色主题背景（之前同一张背景图被各自拉伸变形）
+
 ## v2.1.2 (2026-06-19)
 
 ### 紧急修复
