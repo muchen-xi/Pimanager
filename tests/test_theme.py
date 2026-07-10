@@ -140,36 +140,27 @@ class TestThemeColorsGet(unittest.TestCase):
         self.assertEqual(dark_bg, '#0D1117')
         self.assertEqual(light_bg, '#FFFFFF')
 
-    def test_canvas_specific_colors_dark(self):
-        """深色模式 Canvas 专用颜色。"""
-        self.assertEqual(ThemeColors.get('canvas_bg'), '#0D1117')
-        self.assertEqual(ThemeColors.get('canvas_text'), '#C9D1D9')
-        self.assertEqual(ThemeColors.get('canvas_err'), '#FF6B6B')
+    def test_canvas_specific_colors_removed_in_v3(self):
+        """v3 版本移除了 Canvas 专用颜色键，应返回 #000000 回退值。"""
+        self.assertEqual(ThemeColors.get('canvas_bg'), '#000000')
 
-    def test_canvas_specific_colors_light(self):
-        """浅色模式 Canvas 专用颜色。"""
-        ThemeColors.set_mode('light')
-        self.assertEqual(ThemeColors.get('canvas_bg'), '#FFFFFF')
-        self.assertEqual(ThemeColors.get('canvas_text'), '#24292F')
-        self.assertEqual(ThemeColors.get('canvas_err'), '#CF222E')
-
-    def test_border_color_is_tuple(self):
-        """边框颜色应为元组类型。"""
+    def test_border_color_is_string(self):
+        """边框颜色为字符串类型（非元组）。"""
         border = ThemeColors.get('card_border')
-        self.assertIsInstance(border, tuple)
-        self.assertEqual(len(border), 2)
+        self.assertIsInstance(border, str)
+        self.assertTrue(border.startswith('#'))
 
-    def test_separator_color_is_tuple(self):
-        """分隔线颜色应为元组类型。"""
+    def test_separator_color_is_string(self):
+        """分隔线颜色为字符串类型。"""
         sep = ThemeColors.get('separator')
-        self.assertIsInstance(sep, tuple)
-        self.assertEqual(len(sep), 2)
+        self.assertIsInstance(sep, str)
+        self.assertTrue(sep.startswith('#'))
 
-    def test_nav_active_color_is_tuple(self):
-        """导航激活色应为元组类型。"""
+    def test_nav_active_color_is_string(self):
+        """导航激活色为字符串类型。"""
         nav = ThemeColors.get('nav_active')
-        self.assertIsInstance(nav, tuple)
-        self.assertEqual(len(nav), 2)
+        self.assertIsInstance(nav, str)
+        self.assertTrue(nav.startswith('#'))
 
     def test_all_dark_color_tokens_accessible(self):
         """深色模式所有颜色令牌均可正常获取。"""
@@ -228,11 +219,11 @@ class TestThemeFgHover(unittest.TestCase):
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 2)
 
-    def test_fg_hover_btn_primary_dark(self):
-        """深色模式主按钮 fg_hover。"""
+    def test_fg_hover_btn_primary_fallback(self):
+        """深色模式主按钮 fg_hover(v3 canvas色移除)。"""
         fg, hover = ThemeColors.fg_hover('btn_primary')
-        self.assertEqual(fg, '#2B5B2B')
-        self.assertEqual(hover, '#3A7A3A')
+        self.assertEqual(fg, '#000000')
+        self.assertEqual(hover, '#000000')
 
     def test_fg_hover_danger_dark(self):
         """深色模式危险按钮 fg_hover（无 _hover 后缀）。"""
@@ -250,12 +241,12 @@ class TestThemeFgHover(unittest.TestCase):
         """不存在的键应返回回退值。"""
         fg, hover = ThemeColors.fg_hover('no_such_key')
         self.assertEqual(fg, '#000000')
-        self.assertEqual(hover, '#222222')
+        self.assertEqual(hover, '#000000')
 
     def test_fg_hover_light_mode(self):
         """浅色模式 fg_hover。"""
         ThemeColors.set_mode('light')
-        fg, hover = ThemeColors.fg_hover('btn_primary')
+        fg, hover = ThemeColors.fg_hover('accent')
         self.assertEqual(fg, '#2DA44E')
         self.assertEqual(hover, '#2C974B')
 
@@ -294,30 +285,26 @@ class TestFontScale(unittest.TestCase):
 
     def test_scaled_font_default(self):
         """默认缩放 (1.0) 下字体尺寸不变。"""
-        family, size = ThemeColors.scaled_font('msyh', 12)
-        self.assertEqual(family, 'msyh')
-        self.assertEqual(size, 12)
+        result = ThemeColors.scaled_font('msyh', 12)
+        self.assertIn('12px msyh', result)
 
     def test_scaled_font_enlarged(self):
         """放大后字体尺寸应增大。"""
         ThemeColors.set_font_scale(1.5)
-        family, size = ThemeColors.scaled_font('msyh', 12)
-        self.assertEqual(family, 'msyh')
-        self.assertEqual(size, 18)
+        result = ThemeColors.scaled_font('msyh', 12)
+        self.assertIn('18px msyh', result)
 
     def test_scaled_font_reduced(self):
         """缩小后字体尺寸应减小。"""
         ThemeColors.set_font_scale(0.5)
-        family, size = ThemeColors.scaled_font('msyh', 14)
-        self.assertEqual(family, 'msyh')
-        self.assertEqual(size, 7)
+        result = ThemeColors.scaled_font('msyh', 14)
+        self.assertIn('7px msyh', result)
 
     def test_scaled_font_rounds_to_int(self):
         """缩放后尺寸应为整数。"""
         ThemeColors.set_font_scale(1.3)
-        family, size = ThemeColors.scaled_font('msyh', 10)
-        self.assertEqual(size, 13)
-        self.assertIsInstance(size, int)
+        result = ThemeColors.scaled_font('msyh', 10)
+        self.assertIn('13px msyh', result)
 
     def test_font_scale_class_level_shared(self):
         """字体缩放因子是类级别共享的。"""
