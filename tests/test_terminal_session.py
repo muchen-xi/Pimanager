@@ -5,9 +5,7 @@ import unittest
 import sys
 import os
 
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from _legacy.terminal_page import TerminalSession
+from pimanager.terminal_page import TerminalSession
 
 
 class TestTerminalSessionCreation(unittest.TestCase):

@@ -1,10 +1,13 @@
 """
-PiManager - 轻量级树莓派管理工具 (v3: NiceGUI)
+PiManager - 轻量级树莓派管理工具
 """
 # Copyright (c) 2026 晨曦 (Chenxi)
-__version__ = '3.0.0'
+__version__ = '2.2.2'
 
-from .state import AppState, BackgroundManager
-from .app import create_main_page
+from .app import PiManagerApp, BackgroundManager
 from .theme import ThemeColors
 from .ssh_client import SSHClient
+from .status_panel import StatusPanel
+from .file_browser import FileBrowser
+from .terminal_page import TerminalPage
+from .settings_page import SettingsPage

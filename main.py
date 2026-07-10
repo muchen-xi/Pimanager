@@ -1,29 +1,28 @@
 """
-PiManager - 轻量级树莓派 Zero W 桌面管理器 (v3: NiceGUI + tkinter + Pillow)
+PiManager - 轻量级树莓派 Zero W 桌面管理器 (v2: tkinter + Pillow)
 入口文件
 """
-from nicegui import ui
-from pimanager.app import AppState, create_main_page
+from pimanager.theme import ThemeColors
+from pimanager.app import PiManagerApp
+from pimanager.config import load_config
 
 
 def main():
-    # 加载配置（AppState 构造时自动完成）
-    AppState.get()
+    # 统一通过 config 模块读取配置（支持 frozen/开发两种模式）
+    config = load_config()
+    appearance = config.get('appearance', {})
+    saved_theme = appearance.get('theme', 'dark')
+    saved_color = appearance.get('color_theme', 'green')
+    saved_scale = appearance.get('font_scale', 1.0)
 
-    # 注册主页面
-    create_main_page()
+    # 初始化主题
+    ThemeColors.set_mode(saved_theme)
+    ThemeColors.set_color_theme(saved_color)
+    ThemeColors.set_font_scale(saved_scale)
 
-    # 启动 NiceGUI（native=True 用 pywebview 开原生桌面窗口）
-    ui.run(
-        title='PiManager - 树莓派管理器',
-        host='127.0.0.1',
-        port=8080,
-        native=True,
-        reload=False,
-        show=True,
-        window_size=(1100, 700),
-        favicon='🚀',
-    )
+    # 启动应用
+    app = PiManagerApp()
+    app.mainloop()
 
 
 if __name__ == '__main__':
