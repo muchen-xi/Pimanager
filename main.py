@@ -13,11 +13,12 @@ def main():
     # 注册主页面
     create_main_page()
 
-    # 启动 NiceGUI
+    # 启动 NiceGUI（native=True 用 pywebview 开原生桌面窗口）
     ui.run(
         title='PiManager - 树莓派管理器',
         host='127.0.0.1',
         port=8080,
+        native=True,
         reload=False,
         show=True,
         window_size=(1100, 700),
